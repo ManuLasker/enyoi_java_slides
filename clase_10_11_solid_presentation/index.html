@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Principios SOLID en Java</title>
+
+  <!-- Reveal.js core CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <!-- Theme -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/dracula.css">
+  <!-- Syntax highlighting for code (Monokai) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+
+  <style>
+    :root {
+      --r-heading-color: #50fa7b;
+      --r-link-color: #8be9fd;
+      --r-main-font-size: 32px;
+    }
+    .reveal h1, .reveal h2 { color: #50fa7b; }
+    .reveal h3 { color: #ffb86c; font-size: 1.1em; }
+    .reveal pre { font-size: 0.45em; margin: 0.3em 0; }
+    .reveal pre code { max-height: 420px; padding: 10px; }
+    .reveal p { font-size: 0.85em; margin: 0.3em 0; }
+    .reveal .slides section { text-align: left; }
+    .reveal .slides section.center { text-align: center; }
+    .reveal ul, .reveal ol { display: block; margin-left: 1em; font-size: 0.85em; }
+    .reveal li { margin-bottom: 0.3em; }
+    .reveal blockquote { font-size: 0.8em; }
+    .reveal table { font-size: 0.75em; }
+    .bad { color: #ff5555; }
+    .good { color: #50fa7b; }
+    .highlight { color: #f1fa8c; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      
+      <!-- Título y Agenda -->
+      <section data-markdown="slides/00-titulo.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- ¿Qué es SOLID? -->
+      <section data-markdown="slides/01-que-es-solid.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- S - Single Responsibility -->
+      <section data-markdown="slides/02-srp.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- O - Open/Closed -->
+      <section data-markdown="slides/03-ocp.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- L - Liskov Substitution -->
+      <section data-markdown="slides/04-lsp.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- I - Interface Segregation -->
+      <section data-markdown="slides/05-isp.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- D - Dependency Inversion -->
+      <section data-markdown="slides/06-dip.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- Arquitectura SOLID -->
+      <section data-markdown="slides/07-arquitectura.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+      <!-- Ejercicios y cierre -->
+      <section data-markdown="slides/08-ejercicios.md"
+               data-separator="^---$"
+               data-separator-vertical="^--$">
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Reveal.js scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/markdown/markdown.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+
+  <script>
+    Reveal.initialize({
+      hash: true,
+      slideNumber: true,
+      plugins: [RevealMarkdown, RevealHighlight, RevealNotes]
+    });
+  </script>
+</body>
+</html>
