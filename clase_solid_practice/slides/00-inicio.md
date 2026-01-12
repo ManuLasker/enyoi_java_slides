@@ -35,15 +35,14 @@
 
 --
 
-## Cinco Ejercicios
+## Cuatro Ejercicios
 
 | # | Clase | Principios |
 |:-:|:------|:-----------|
 | 1 | `NotificationService` | SRP + OCP + DIP |
 | 2 | `OrderProcessor` | SRP + OCP + LSP |
 | 3 | `ReportGenerator` | SRP + OCP + ISP |
-| 4 | `PaymentProcessor` | DIP + OCP |
-| 5 | `EventManager` | SRP + OCP + ISP |
+| 4 | `EventManager` | SRP + OCP + ISP |
 <!-- .element: style="font-size: 0.8em;" -->
 
 --
