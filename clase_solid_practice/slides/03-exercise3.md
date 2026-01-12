@@ -154,13 +154,12 @@ exercise3_reports/refactored/
     │   ├── HtmlReportFormatter.java
     │   ├── CsvReportFormatter.java
     │   ├── PdfReportFormatter.java
+    │   ├── ReportFormatterFactory.java
     │   └── ExcelReportFormatter.java
     ├── exporter/
     │   ├── ReportExporter.java         (Interface segregada)
     │   ├── FileReportExporter.java
     │   └── EmailReportExporter.java
-    ├── factory/
-    │   └── ReportFormatterFactory.java
     └── ReportService.java              (Orquestador limpio)
 ```
 <!-- .element: style="font-size: 0.5em;" -->

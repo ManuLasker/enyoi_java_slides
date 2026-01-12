@@ -1,4 +1,4 @@
-# Ejercicio 5: EventManager
+# Ejercicio 4: EventManager
 <!-- .element: class="r-fit-text" -->
 
 --
@@ -198,7 +198,10 @@ exercise5_events/refactored/
     │   ├── UserRegisteredEvent.java
     │   ├── OrderPlacedEvent.java
     │   ├── PaymentReceivedEvent.java
+    │   ├── AlertEvent.java
     │   └── SystemAlertEvent.java
+    ├── model/
+    │   └── AuditLogEntry.java
     ├── listener/
     │   ├── EventListener.java          (Interface - Observer)
     │   ├── EmailNotificationListener.java

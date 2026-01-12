@@ -82,13 +82,6 @@ public class OrderProcessor {
     
     ordersDatabase.put(orderId, order);
     
-    // ============ NOTIFICACIÓN (debería estar separada) ============
-    sendOrderConfirmation(orderId, customerType);
-    
-    // ============ GENERAR FACTURA (debería estar separada) ============
-    String invoice = generateInvoice(order);
-    order.put("invoice", invoice);
-    
     return order;
   }
 
@@ -96,25 +89,11 @@ public class OrderProcessor {
     // Lógica acá
   }
 
-  private void sendOrderConfirmation(String orderId, String customerType) {
-    // Lógica acá
-  }
-
-  private String generateInvoice(Map<String, Object> order) {
-    // lógica acá
-  }
 
   private Map<String, Object> getOrder(String orderId) {
     // lógica acá
   }
 
-  private void updateOrderStatus(String orderId, String newStatus) {
-    // lógica acá
-  }
-
-  private boolean isValidStatusTransition(String from, String to) {
-    // lógica acá
-  }
 
   public List<Map<String, Object>> getAllOrders() {
     // lógica acá
@@ -177,12 +156,16 @@ exercise2_orders/refactored/
     ├── model/
     │   ├── Order.java
     │   ├── OrderItem.java
+    │   ├── CustomerType.java
+    │   ├── OrderStatus.java
+    │   ├── ValidationResult.java
     │   └── Customer.java
     ├── discount/
     │   ├── DiscountStrategy.java          (Interface)
-    │   ├── RegularCustomerDiscount.java   (0% descuento)
-    │   ├── PremiumCustomerDiscount.java   (10% descuento)
-    │   ├── VipCustomerDiscount.java       (20% descuento)
+    │   ├── RegularCustomerDiscount.java   (Implementación)
+    │   ├── PremiumCustomerDiscount.java   (Implementación)
+    │   ├── VipCustomerDiscount.java       (Implementación)
+    │   ├── EmployeeCustomerDiscount.java  (Implementación)
     │   └── DiscountStrategyFactory.java
     ├── repository/
     │   ├── OrderRepository.java           (Interface)
@@ -190,6 +173,7 @@ exercise2_orders/refactored/
     ├── validator/
     │   └── OrderValidator.java
     ├── tax/
+    │   ├── ShippingCalculator.java
     │   └── TaxCalculator.java
     └── OrderService.java                  (Orquestador limpio)
 ```

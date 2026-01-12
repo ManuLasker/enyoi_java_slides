@@ -154,11 +154,13 @@ exercise1_notifications/refactored/
     ├── EmailNotificationSender.java   (Implementación concreta)
     ├── SmsNotificationSender.java     (Implementación concreta)
     ├── PushNotificationSender.java    (Implementación concreta)
+    ├── NotificationResult.java        (Dto de Respuesta)
+    │
     │
     ├── NotificationSenderFactory.java (Factory para crear senders)
     │
     ├── NotificationLogger.java        (Responsabilidad separada)
-    ├── NotificationValidator.java     (Responsabilidad separada)
+    ├── NotificationLogEntry.java      (Dto LogEntry)
     │
     └── NotificationService.java       (Orquestador limpio)
 ```
