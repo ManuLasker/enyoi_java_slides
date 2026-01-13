@@ -1,0 +1,1204 @@
+---
+title: Arquitectura Hexagonal en Java
+subtitle: Puertos y Adaptadores - Una guía completa
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard: 
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 500px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    mermaid:
+      theme: dark
+    footer: "Arquitectura Hexagonal"
+---
+
+# Introducción
+
+La **Arquitectura Hexagonal** fue propuesta por Alistair Cockburn en 2005.
+
+También conocida como **Ports and Adapters** (Puertos y Adaptadores).
+
+**Objetivo principal**: Crear aplicaciones que sean independientes de los mecanismos de entrega y de las tecnologías de infraestructura.
+
+---
+
+## El Problema que Resuelve
+
+En aplicaciones tradicionales:
+
+- La lógica de negocio está mezclada con código de base de datos
+- Los cambios en la UI afectan la lógica de negocio
+- Es difícil probar sin levantar toda la infraestructura
+- Cambiar de tecnología requiere reescribir gran parte del código
+
+---
+
+## Analogía: Un Negocio Real { .smaller }
+
+Imagina una **tienda física**:
+
+- **El corazón del negocio**: Vender productos, gestionar inventario, calcular precios
+- **Canales de venta**: Mostrador, teléfono, página web, app móvil
+- **Proveedores**: Almacén propio, distribuidores, importadores
+
+El negocio funciona igual sin importar cómo llegue el cliente o de dónde venga el producto.
+
+---
+
+## Diagrama General { .smaller }
+
+```{mermaid}
+graph TB
+
+    subgraph "Mundo Exterior - </br> Lado Izquierdo (Driving)"
+        UI["Interfaz de Usuario"]
+        API["API REST"]
+        CLI["Línea de Comandos"]
+        TEST["Tests Automatizados"]
+    end
+
+
+    subgraph "Hexágono - Aplicación"
+        PI["Puertos de Entrada"]
+        CORE["Dominio / Lógica de Negocio"]
+        PO["Puertos de Salida"]
+    end
+
+
+    subgraph "Mundo Exterior - </br> Lado Derecho (Driven)"
+        DB["Base de Datos"]
+        EMAIL["Servicio de Email"]
+        EXT["APIs Externas"]
+        FILE["Sistema de Archivos"]
+    end
+
+
+    UI --> PI
+    API --> PI
+    CLI --> PI
+    TEST --> PI
+    PI --> CORE
+    CORE --> PO
+    PO --> DB
+    PO --> EMAIL
+    PO --> EXT
+    PO --> FILE
+```
+
+---
+
+## Los Tres Componentes Principales
+
+1. **Dominio (Núcleo)**: La lógica de negocio pura
+2. **Puertos**: Interfaces que definen cómo se comunica el dominio
+3. **Adaptadores**: Implementaciones concretas de los puertos
+
+
+
+# Componente 1: El Dominio { .smaller }
+
+El **dominio** es el corazón de la aplicación. Contiene:
+
+- **Entidades**: Objetos con identidad y ciclo de vida
+- **Objetos de Valor**: Objetos inmutables sin identidad
+- **Reglas de Negocio**: La lógica que hace única a tu aplicación
+- **Servicios de Dominio**: Operaciones que no pertenecen a una entidad
+
+---
+
+## Ejemplo de Entidad de Dominio { .smaller }
+
+```java
+package com.banco.dominio.entidades;
+
+public class CuentaBancaria {
+    private final String numeroCuenta;
+    private String titular;
+    private double saldo;
+    private boolean activa;
+    
+    public CuentaBancaria(String numeroCuenta, String titular, double saldoInicial) {
+        if (numeroCuenta == null || numeroCuenta.isEmpty()) {
+            throw new IllegalArgumentException("El número de cuenta es obligatorio");
+        }
+        if (saldoInicial < 0) {
+            throw new IllegalArgumentException("El saldo inicial no puede ser negativo");
+        }
+        this.numeroCuenta = numeroCuenta;
+        this.titular = titular;
+        this.saldo = saldoInicial;
+        this.activa = true;
+    }
+    
+    // Getters
+    public String getNumeroCuenta() { return numeroCuenta; }
+    public String getTitular() { return titular; }
+    public double getSaldo() { return saldo; }
+    public boolean isActiva() { return activa; }
+}
+```
+
+---
+
+## Reglas de Negocio en la Entidad { .smaller }
+
+```java
+// Continuación de CuentaBancaria.java
+
+public void depositar(double monto) {
+    validarCuentaActiva();
+    if (monto <= 0) {
+        throw new IllegalArgumentException("El monto debe ser mayor a cero");
+    }
+    this.saldo += monto;
+}
+
+public void retirar(double monto) {
+    validarCuentaActiva();
+    if (monto <= 0) {
+        throw new IllegalArgumentException("El monto debe ser mayor a cero");
+    }
+    if (monto > this.saldo) {
+        throw new IllegalStateException("Saldo insuficiente para realizar el retiro");
+    }
+    this.saldo -= monto;
+}
+
+private void validarCuentaActiva() {
+    if (!this.activa) {
+        throw new IllegalStateException("La cuenta está inactiva");
+    }
+}
+
+public void desactivar() {
+    this.activa = false;
+}
+```
+
+---
+
+## Objeto de Valor: Ejemplo { .smaller }
+
+```java
+package com.banco.dominio.valores;
+
+public final class Dinero {
+    private final double cantidad;
+    private final String moneda;
+    
+    public Dinero(double cantidad, String moneda) {
+        if (cantidad < 0) {
+            throw new IllegalArgumentException("La cantidad no puede ser negativa");
+        }
+        this.cantidad = cantidad;
+        this.moneda = moneda;
+    }
+    
+    public Dinero sumar(Dinero otro) {
+        if (!this.moneda.equals(otro.moneda)) {
+            throw new IllegalArgumentException("No se pueden sumar monedas diferentes");
+        }
+        return new Dinero(this.cantidad + otro.cantidad, this.moneda);
+    }
+    
+    public double getCantidad() { return cantidad; }
+    public String getMoneda() { return moneda; }
+}
+```
+
+::: {.callout-note}
+Los objetos de valor son inmutables y se comparan por sus atributos
+:::
+
+---
+
+## Analogía del Dominio en la Vida Real { .smaller }
+
+**Sistema de Hospital**:
+
+- **Entidades**: Paciente, Doctor, Cita, HistorialMedico
+- **Objetos de Valor**: Direccion, Telefono, Diagnostico
+- **Reglas de Negocio**: 
+  - Un doctor no puede tener más de 8 citas al día
+  - Un paciente debe tener historial antes de ser operado
+  - Las recetas deben ser firmadas por un doctor certificado
+
+
+
+# Componente 2: Los Puertos { .smaller }
+
+Los **puertos** son interfaces que definen los contratos de comunicación.
+
+**Dos tipos de puertos**:
+
+- **Puertos de Entrada (Driving/Primary)**: Definen qué operaciones ofrece la aplicación
+- **Puertos de Salida (Driven/Secondary)**: Definen qué necesita la aplicación del exterior
+
+---
+
+## Puerto de Entrada: Ejemplo { .smaller }
+
+
+```java
+package com.banco.puertos.entrada;
+
+import com.banco.dominio.entidades.CuentaBancaria;
+
+public interface GestionCuentasService {
+    
+    CuentaBancaria crearCuenta(String titular, double saldoInicial);
+    
+    void realizarDeposito(String numeroCuenta, double monto);
+    
+    void realizarRetiro(String numeroCuenta, double monto);
+    
+    void transferir(String cuentaOrigen, String cuentaDestino, double monto);
+    
+    double consultarSaldo(String numeroCuenta);
+    
+    CuentaBancaria obtenerCuenta(String numeroCuenta);
+}
+```
+
+::: {.callout-note}
+Define las operaciones que la aplicación expone
+:::
+
+---
+
+## Puerto de Salida: Repositorio { .smaller }
+
+
+```java
+package com.banco.puertos.salida;
+
+import com.banco.dominio.entidades.CuentaBancaria;
+import java.util.List;
+import java.util.Optional;
+
+public interface CuentaBancariaRepository {
+    
+    void guardar(CuentaBancaria cuenta);
+    
+    Optional<CuentaBancaria> buscarPorNumero(String numeroCuenta);
+    
+    List<CuentaBancaria> buscarPorTitular(String titular);
+    
+    List<CuentaBancaria> obtenerTodas();
+    
+    void actualizar(CuentaBancaria cuenta);
+    
+    void eliminar(String numeroCuenta);
+    
+    boolean existe(String numeroCuenta);
+}
+```
+
+::: {.callout-note}
+Define cómo la aplicación accede a datos persistidos
+:::
+
+---
+
+## Puerto de Salida: Notificaciones { .smaller }
+
+```java
+package com.banco.puertos.salida;
+
+public interface NotificacionService {
+    
+    void enviarNotificacionDeposito(String numeroCuenta, double monto);
+    
+    void enviarNotificacionRetiro(String numeroCuenta, double monto);
+    
+    void enviarNotificacionTransferencia(
+        String cuentaOrigen, 
+        String cuentaDestino, 
+        double monto
+    );
+    
+    void enviarAlertaSaldoBajo(String numeroCuenta, double saldoActual);
+}
+```
+
+
+---
+
+## Analogía de Puertos en la Vida Real { .smaller }
+
+**Restaurante**:
+
+- **Puerto de Entrada**: El menú (define qué platos puedes pedir)
+- **Puerto de Salida hacia cocina**: Pedidos de ingredientes al proveedor
+- **Puerto de Salida hacia clientes**: Sistema de entrega (mesero, delivery)
+
+El chef (dominio) no necesita saber si el cliente ordenó por teléfono o en persona.
+
+
+# Componente 3: Los Adaptadores {.smaller}
+
+Los **adaptadores** son implementaciones concretas de los puertos.
+
+::: columns
+::: {.column width="50%"}
+**Adaptadores Primarios (Driving)**: Reciben peticiones del exterior
+
+- Controladores REST
+- Interfaces gráficas
+- Comandos de consola
+- Handlers de mensajes
+:::
+
+::: {.column width="50%"}
+**Adaptadores Secundarios (Driven)**: Conectan con servicios externos
+
+- Repositorios de base de datos
+- Clientes de APIs externas
+- Servicios de email/SMS
+:::
+:::
+
+
+
+---
+
+## Diagrama de Flujo de Adaptadores {.smaller}
+
+```{mermaid}
+%%| fig-width: 10
+sequenceDiagram
+    participant Cliente
+    participant AdaptadorREST
+    participant PuertoEntrada
+    participant Dominio
+    participant PuertoSalida
+    participant AdaptadorBD
+    
+    Cliente->>AdaptadorREST: POST /deposito
+    AdaptadorREST->>PuertoEntrada: realizarDeposito()
+    PuertoEntrada->>Dominio: ejecutar lógica
+    Dominio->>PuertoSalida: guardar cuenta
+    PuertoSalida->>AdaptadorBD: INSERT/UPDATE
+    AdaptadorBD-->>PuertoSalida: confirmación
+    PuertoSalida-->>Dominio: OK
+    Dominio-->>PuertoEntrada: resultado
+    PuertoEntrada-->>AdaptadorREST: respuesta
+    AdaptadorREST-->>Cliente: HTTP 200 OK
+```
+
+---
+
+## Adaptador Primario: Controlador REST { .smaller }
+
+::: { style="font-size: 1.0em;" }
+```java
+package com.banco.adaptadores.entrada;
+
+import com.banco.puertos.entrada.GestionCuentasService;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import java.io.IOException;
+import java.io.OutputStream;
+
+public class CuentaHttpHandler implements HttpHandler {
+    private final GestionCuentasService servicio;
+    
+    public CuentaHttpHandler(GestionCuentasService servicio) {
+        this.servicio = servicio;
+    }
+    
+    @Override
+    public void handle(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        String method = exchange.getRequestMethod();
+        
+        if (method.equals("GET") && path.startsWith("/cuenta/saldo/")) {
+            manejarConsultaSaldo(exchange);
+        } else if (method.equals("POST") && path.equals("/cuenta/deposito")) {
+            manejarDeposito(exchange);
+        }
+    }
+    // Continúa en siguiente slide...
+}
+```
+:::
+
+---
+
+## Adaptador REST: Métodos de Manejo { .smaller }
+
+```java
+// Continuación de CuentaHttpHandler.java
+
+private void manejarConsultaSaldo(HttpExchange exchange) throws IOException {
+    String numeroCuenta = exchange.getRequestURI().getPath()
+        .replace("/cuenta/saldo/", "");
+    
+    try {
+        double saldo = servicio.consultarSaldo(numeroCuenta);
+        String respuesta = "{\"numeroCuenta\":\"" + numeroCuenta + 
+                          "\",\"saldo\":" + saldo + "}";
+        enviarRespuesta(exchange, 200, respuesta);
+    } catch (Exception e) {
+        enviarRespuesta(exchange, 404, "{\"error\":\"Cuenta no encontrada\"}");
+    }
+}
+
+private void enviarRespuesta(HttpExchange exchange, int codigo, String cuerpo) 
+        throws IOException {
+    exchange.getResponseHeaders().set("Content-Type", "application/json");
+    exchange.sendResponseHeaders(codigo, cuerpo.length());
+    try (OutputStream os = exchange.getResponseBody()) {
+        os.write(cuerpo.getBytes());
+    }
+}
+```
+
+---
+
+## Adaptador Primario: Consola (CLI) { .smaller }
+
+```java
+package com.banco.adaptadores.entrada;
+
+import com.banco.puertos.entrada.GestionCuentasService;
+import java.util.Scanner;
+
+public class ConsolaBancaria {
+    private final GestionCuentasService servicio;
+    private final Scanner scanner;
+    
+    public ConsolaBancaria(GestionCuentasService servicio) {
+        this.servicio = servicio;
+        this.scanner = new Scanner(System.in);
+    }
+    
+    public void iniciar() {
+        System.out.println("=== Sistema Bancario ===");
+        boolean continuar = true;
+        
+        while (continuar) {
+            mostrarMenu();
+            int opcion = scanner.nextInt();
+            continuar = procesarOpcion(opcion);
+        }
+    }
+    // Continúa...
+}
+```
+
+---
+
+## Adaptador CLI: Menú y Opciones { .smaller }
+
+```java
+// Continuación de ConsolaBancaria.java
+
+private void mostrarMenu() {
+    System.out.println("\n1. Crear cuenta");
+    System.out.println("2. Consultar saldo");
+    System.out.println("3. Depositar");
+    System.out.println("4. Retirar");
+    System.out.println("5. Salir");
+    System.out.print("Seleccione opción: ");
+}
+
+private boolean procesarOpcion(int opcion) {
+    switch (opcion) {
+        case 1: crearCuenta(); break;
+        case 2: consultarSaldo(); break;
+        case 3: depositar(); break;
+        case 4: retirar(); break;
+        case 5: return false;
+        default: System.out.println("Opción inválida");
+    }
+    return true;
+}
+
+private void consultarSaldo() {
+    System.out.print("Número de cuenta: ");
+    String numero = scanner.next();
+    double saldo = servicio.consultarSaldo(numero);
+    System.out.println("Saldo actual: $" + saldo);
+}
+```
+
+---
+
+## Adaptador Secundario: Repositorio en Memoria { .smaller }
+
+```java
+package com.banco.adaptadores.salida;
+
+import com.banco.dominio.entidades.CuentaBancaria;
+import com.banco.puertos.salida.CuentaBancariaRepository;
+import java.util.*;
+
+public class CuentaBancariaRepositoryEnMemoria implements CuentaBancariaRepository {
+    private final Map<String, CuentaBancaria> cuentas = new HashMap<>();
+    
+    @Override
+    public void guardar(CuentaBancaria cuenta) {
+        cuentas.put(cuenta.getNumeroCuenta(), cuenta);
+    }
+    
+    @Override
+    public Optional<CuentaBancaria> buscarPorNumero(String numeroCuenta) {
+        return Optional.ofNullable(cuentas.get(numeroCuenta));
+    }
+    
+    @Override
+    public List<CuentaBancaria> obtenerTodas() {
+        return new ArrayList<>(cuentas.values());
+    }
+    
+    @Override
+    public boolean existe(String numeroCuenta) {
+        return cuentas.containsKey(numeroCuenta);
+    }
+    // ... resto de métodos
+}
+```
+
+---
+
+## Adaptador Secundario: Repositorio con Archivo { .smaller }
+
+```java
+package com.banco.adaptadores.salida;
+
+import com.banco.dominio.entidades.CuentaBancaria;
+import com.banco.puertos.salida.CuentaBancariaRepository;
+import java.io.*;
+import java.util.*;
+
+public class CuentaBancariaRepositoryArchivo implements CuentaBancariaRepository {
+    private final String rutaArchivo;
+    
+    public CuentaBancariaRepositoryArchivo(String rutaArchivo) {
+        this.rutaArchivo = rutaArchivo;
+    }
+    
+    @Override
+    public void guardar(CuentaBancaria cuenta) {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(rutaArchivo, true))) {
+            String linea = cuenta.getNumeroCuenta() + "," + 
+                          cuenta.getTitular() + "," + 
+                          cuenta.getSaldo() + "," + 
+                          cuenta.isActiva();
+            writer.println(linea);
+        } catch (IOException e) {
+            throw new RuntimeException("Error al guardar cuenta", e);
+        }
+    }
+    // ... otros métodos similares
+}
+```
+
+---
+
+## Adaptador Secundario: Notificaciones por Consola { .smaller }
+
+```java
+package com.banco.adaptadores.salida;
+
+import com.banco.puertos.salida.NotificacionService;
+
+public class NotificacionServiceConsola implements NotificacionService {
+    
+    @Override
+    public void enviarNotificacionDeposito(String numeroCuenta, double monto) {
+        System.out.println("[NOTIFICACION] Depósito de $" + monto + 
+                          " en cuenta " + numeroCuenta);
+    }
+    
+    @Override
+    public void enviarNotificacionRetiro(String numeroCuenta, double monto) {
+        System.out.println("[NOTIFICACION] Retiro de $" + monto + 
+                          " de cuenta " + numeroCuenta);
+    }
+    
+    @Override
+    public void enviarAlertaSaldoBajo(String numeroCuenta, double saldoActual) {
+        System.out.println("[ALERTA] Saldo bajo en cuenta " + numeroCuenta + 
+                          ": $" + saldoActual);
+    }
+}
+```
+
+---
+
+## Adaptador Secundario: Notificaciones por Email { .smaller }
+
+```java
+package com.banco.adaptadores.salida;
+
+import com.banco.puertos.salida.NotificacionService;
+import java.util.Properties;
+import javax.mail.*;
+import javax.mail.internet.*;
+
+public class NotificacionServiceEmail implements NotificacionService {
+    private final String smtpHost;
+    private final String remitente;
+    private final Map<String, String> emailsPorCuenta;
+    
+    public NotificacionServiceEmail(String smtpHost, String remitente) {
+        this.smtpHost = smtpHost;
+        this.remitente = remitente;
+        this.emailsPorCuenta = new HashMap<>();
+    }
+    
+    @Override
+    public void enviarNotificacionDeposito(String numeroCuenta, double monto) {
+        String email = emailsPorCuenta.get(numeroCuenta);
+        String asunto = "Depósito realizado";
+        String cuerpo = "Se ha depositado $" + monto + " en su cuenta.";
+        enviarEmail(email, asunto, cuerpo);
+    }
+    // ... implementación de enviarEmail
+}
+```
+
+
+## Implementación del Caso de Uso { .smaller }
+
+```java
+package com.banco.aplicacion;
+
+import com.banco.dominio.entidades.CuentaBancaria;
+import com.banco.puertos.entrada.GestionCuentasService;
+import com.banco.puertos.salida.CuentaBancariaRepository;
+import com.banco.puertos.salida.NotificacionService;
+import java.util.UUID;
+
+public class GestionCuentasServiceImpl implements GestionCuentasService { // <1>
+    private final CuentaBancariaRepository repositorio;
+    private final NotificacionService notificaciones;
+    private static final double SALDO_MINIMO_ALERTA = 100.0;
+    
+    public GestionCuentasServiceImpl(
+            CuentaBancariaRepository repositorio,
+            NotificacionService notificaciones) {
+        this.repositorio = repositorio;
+        this.notificaciones = notificaciones;
+    }
+    
+    @Override
+    public CuentaBancaria crearCuenta(String titular, double saldoInicial) {
+        String numeroCuenta = generarNumeroCuenta();
+        CuentaBancaria cuenta = new CuentaBancaria(numeroCuenta, titular, saldoInicial);
+        repositorio.guardar(cuenta);
+        return cuenta;
+    }
+    // Continúa...
+}
+```
+
+1. Implementación del puerto de entradata [Ir](#puerto-de-entrada-ejemplo)
+
+---
+
+## Caso de Uso: Operaciones Bancarias { .smaller }
+
+```java
+// Continuación de GestionCuentasServiceImpl.java
+
+@Override
+public void realizarDeposito(String numeroCuenta, double monto) {
+    CuentaBancaria cuenta = obtenerCuentaOFallar(numeroCuenta);
+    cuenta.depositar(monto);
+    repositorio.actualizar(cuenta);
+    notificaciones.enviarNotificacionDeposito(numeroCuenta, monto);
+}
+
+@Override
+public void realizarRetiro(String numeroCuenta, double monto) {
+    CuentaBancaria cuenta = obtenerCuentaOFallar(numeroCuenta);
+    cuenta.retirar(monto);
+    repositorio.actualizar(cuenta);
+    notificaciones.enviarNotificacionRetiro(numeroCuenta, monto);
+    
+    if (cuenta.getSaldo() < SALDO_MINIMO_ALERTA) {
+        notificaciones.enviarAlertaSaldoBajo(numeroCuenta, cuenta.getSaldo());
+    }
+}
+
+private CuentaBancaria obtenerCuentaOFallar(String numeroCuenta) {
+    return repositorio.buscarPorNumero(numeroCuenta)
+        .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + numeroCuenta));
+}
+```
+
+---
+
+## Caso de Uso: Transferencia { .smaller }
+
+```java
+// Continuación de GestionCuentasServiceImpl.java
+
+@Override
+public void transferir(String cuentaOrigen, String cuentaDestino, double monto) {
+    CuentaBancaria origen = obtenerCuentaOFallar(cuentaOrigen);
+    CuentaBancaria destino = obtenerCuentaOFallar(cuentaDestino);
+    
+    // Validaciones de negocio
+    if (cuentaOrigen.equals(cuentaDestino)) {
+        throw new IllegalArgumentException("No puede transferir a la misma cuenta");
+    }
+    
+    // Operación atómica
+    origen.retirar(monto);
+    destino.depositar(monto);
+    
+    // Persistir cambios
+    repositorio.actualizar(origen);
+    repositorio.actualizar(destino);
+    
+    // Notificar
+    notificaciones.enviarNotificacionTransferencia(cuentaOrigen, cuentaDestino, monto);
+}
+
+@Override
+public double consultarSaldo(String numeroCuenta) {
+    return obtenerCuentaOFallar(numeroCuenta).getSaldo();
+}
+```
+
+---
+
+## Composición: Conectando Todo { .smaller }
+
+```java
+package com.banco;
+
+import com.banco.adaptadores.entrada.*;
+import com.banco.adaptadores.salida.*;
+import com.banco.aplicacion.*;
+import com.banco.puertos.entrada.*;
+import com.banco.puertos.salida.*;
+
+public class Aplicacion {
+    public static void main(String[] args) {
+        // 1. Crear adaptadores de salida (infraestructura)
+        CuentaBancariaRepository repositorio = new CuentaBancariaRepositoryEnMemoria();
+        NotificacionService notificaciones = new NotificacionServiceConsola();
+        
+        // 2. Crear el servicio de aplicación (casos de uso)
+        GestionCuentasService servicio = new GestionCuentasServiceImpl(
+            repositorio, 
+            notificaciones
+        );
+        
+        // 3. Crear adaptador de entrada (interfaz de usuario)
+        ConsolaBancaria consola = new ConsolaBancaria(servicio);
+        
+        // 4. Iniciar la aplicación
+        consola.iniciar();
+    }
+}
+```
+
+---
+
+## Composición Alternativa: Con API HTTP { .smaller }
+
+```java
+package com.banco;
+
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+
+public class AplicacionWeb {
+    public static void main(String[] args) throws Exception {
+        // Mismos adaptadores de salida
+        CuentaBancariaRepository repositorio = new CuentaBancariaRepositoryEnMemoria();
+        NotificacionService notificaciones = new NotificacionServiceConsola();
+        
+        // Mismo servicio
+        GestionCuentasService servicio = new GestionCuentasServiceImpl(
+            repositorio, notificaciones
+        );
+        
+        // DIFERENTE adaptador de entrada: HTTP en lugar de consola
+        HttpServer servidor = HttpServer.create(new InetSocketAddress(8080), 0);
+        servidor.createContext("/cuenta", new CuentaHttpHandler(servicio));
+        servidor.start();
+        
+        System.out.println("Servidor iniciado en puerto 8080");
+    }
+}
+```
+
+---
+
+## Estructura de Carpetas del Proyecto { .smaller }
+
+::: { style="font-size: 0.7em;"}
+
+```
+src/
+├── com/banco/
+│   ├── dominio/                 # Núcleo - Sin dependencias externas
+│   │   ├── entidades/
+│   │   │   └── CuentaBancaria.java
+│   │   └── valores/
+│   │       └── Dinero.java
+│   │
+│   ├── puertos/                 # Interfaces - Contratos
+│   │   ├── entrada/
+│   │   │   └── GestionCuentasService.java
+│   │   └── salida/
+│   │       ├── CuentaBancariaRepository.java
+│   │       └── NotificacionService.java
+│   │
+│   ├── aplicacion/              # Casos de uso
+│   │   └── GestionCuentasServiceImpl.java
+│   │
+│   ├── adaptadores/             # Implementaciones concretas
+│   │   ├── entrada/
+│   │   │   ├── CuentaHttpHandler.java
+│   │   │   └── ConsolaBancaria.java
+│   │   └── salida/
+│   │       ├── CuentaBancariaRepositoryEnMemoria.java
+│   │       └── NotificacionServiceConsola.java
+│   │
+│   └── Aplicacion.java          # Punto de entrada y composición
+```
+:::
+
+---
+
+## Regla de Dependencia { .smaller }
+
+```{mermaid}
+%%| fig-width: 8
+graph TB
+    subgraph "Capas de la Arquitectura"
+        A["Adaptadores<br/>(Más externa)"]
+        B["Puertos"]
+        C["Aplicación/Casos de Uso"]
+        D["Dominio<br/>(Más interna)"]
+    end
+    
+    A -->|depende de| B
+    B -->|depende de| C
+    C -->|depende de| D
+```
+
+Las dependencias siempre apuntan hacia adentro. El dominio no conoce nada del exterior.
+
+---
+
+## Testing: La Gran Ventaja { .smaller }
+
+::: { style="font-size: 0.8em" }
+```java
+package com.banco.test;
+
+import com.banco.adaptadores.salida.*;
+import com.banco.aplicacion.*;
+import com.banco.puertos.salida.*;
+
+public class TestGestionCuentas {
+    public static void main(String[] args) {
+        // Adaptadores de prueba (fakes)
+        CuentaBancariaRepository repoFake = new CuentaBancariaRepositoryEnMemoria();
+        NotificacionService notifFake = new NotificacionServiceConsola();
+        
+        // Servicio real con dependencias falsas
+        GestionCuentasServiceImpl servicio = new GestionCuentasServiceImpl(
+            repoFake, notifFake
+        );
+        
+        // Ejecutar pruebas
+        testCrearCuenta(servicio);
+        testDeposito(servicio);
+        testRetiro(servicio);
+        testTransferencia(servicio);
+        
+        System.out.println("Todas las pruebas pasaron correctamente");
+    }
+}
+```
+
+:::  {.callout-note style="font-size: 0.8em;"}
+Sin base de datos real, sin servidores, sin infraestructura
+:::
+:::
+
+---
+
+## Tests Unitarios { .smaller }
+
+```java
+// Continuación de TestGestionCuentas.java
+
+private static void testCrearCuenta(GestionCuentasServiceImpl servicio) {
+    var cuenta = servicio.crearCuenta("Juan Pérez", 1000.0);
+    
+    assert cuenta != null : "La cuenta no debe ser null";
+    assert cuenta.getTitular().equals("Juan Pérez") : "Titular incorrecto";
+    assert cuenta.getSaldo() == 1000.0 : "Saldo inicial incorrecto";
+    
+    System.out.println("Test crear cuenta: OK");
+}
+
+private static void testDeposito(GestionCuentasServiceImpl servicio) {
+    var cuenta = servicio.crearCuenta("María López", 500.0);
+    String numero = cuenta.getNumeroCuenta();
+    
+    servicio.realizarDeposito(numero, 250.0);
+    
+    double saldo = servicio.consultarSaldo(numero);
+    assert saldo == 750.0 : "Saldo después de depósito incorrecto";
+    
+    System.out.println("Test depósito: OK");
+}
+```
+
+---
+
+## Tests de Casos de Error { .smaller }
+
+```java
+private static void testRetiroSaldoInsuficiente(GestionCuentasServiceImpl servicio) {
+    var cuenta = servicio.crearCuenta("Carlos Ruiz", 100.0);
+    String numero = cuenta.getNumeroCuenta();
+    
+    boolean errorLanzado = false;
+    try {
+        servicio.realizarRetiro(numero, 500.0);
+    } catch (IllegalStateException e) {
+        errorLanzado = true;
+        assert e.getMessage().contains("insuficiente") : "Mensaje de error incorrecto";
+    }
+    
+    assert errorLanzado : "Debería lanzar excepción por saldo insuficiente";
+    assert servicio.consultarSaldo(numero) == 100.0 : "El saldo no debe cambiar";
+    
+    System.out.println("Test retiro saldo insuficiente: OK");
+}
+```
+
+---
+
+## Ejemplo Real: Sistema de Pedidos { .smaller }
+
+```{mermaid}
+%%| fig-width: 10
+graph LR
+    subgraph "Adaptadores de Entrada"
+        WEB["App Web"]
+        MOVIL["App Móvil"]
+        CALL["Call Center"]
+    end
+    
+    subgraph "Puertos de Entrada"
+        PS["PedidoService"]
+    end
+    
+    subgraph "Dominio"
+        P["Pedido"]
+        LP["LineaPedido"]
+        C["Cliente"]
+    end
+    
+    subgraph "Puertos de Salida"
+        PR["PedidoRepository"]
+        INV["InventarioService"]
+        PAY["PagoService"]
+    end
+    
+    subgraph "Adaptadores de Salida"
+        DB["PostgreSQL"]
+        SAP["Sistema SAP"]
+        STRIPE["Stripe API"]
+    end
+    
+    WEB --> PS
+    MOVIL --> PS
+    CALL --> PS
+    PS --> P
+    P --> LP
+    P --> C
+    P --> PR
+    P --> INV
+    P --> PAY
+    PR --> DB
+    INV --> SAP
+    PAY --> STRIPE
+```
+
+---
+
+## Ejemplo Real: Puerto de Inventario { .smaller }
+
+```java
+package com.tienda.puertos.salida;
+
+public interface InventarioService {
+    
+    boolean verificarDisponibilidad(String codigoProducto, int cantidad);
+    
+    void reservarProducto(String codigoProducto, int cantidad, String idPedido);
+    
+    void liberarReserva(String codigoProducto, int cantidad, String idPedido);
+    
+    void confirmarSalida(String codigoProducto, int cantidad, String idPedido);
+    
+    int obtenerStockDisponible(String codigoProducto);
+}
+```
+
+---
+
+## Ejemplo Real: Puerto de Pagos { .smaller }
+
+::: { style="font-size: 0.9em" }
+```java
+package com.tienda.puertos.salida;
+
+public interface PagoService {
+    
+    ResultadoPago procesarPago(DatosPago datos);
+    
+    ResultadoPago reembolsar(String idTransaccion, double monto);
+    
+    EstadoPago consultarEstado(String idTransaccion);
+}
+
+public class DatosPago {
+    private String idPedido;
+    private double monto;
+    private String metodoPago;
+    private Map<String, String> datosMetodo;
+    // getters y setters
+}
+
+public class ResultadoPago {
+    private boolean exitoso;
+    private String idTransaccion;
+    private String mensajeError;
+    // getters y setters
+}
+```
+:::
+
+---
+
+## Beneficios Demostrados { .smaller }
+
+**Intercambiabilidad**: Cambiar de PostgreSQL a MongoDB solo requiere un nuevo adaptador
+
+**Testabilidad**: Probar la lógica de pedidos sin Stripe real ni base de datos
+
+**Mantenibilidad**: Cambios en la UI no afectan la lógica de negocio
+
+**Escalabilidad**: Agregar un nuevo canal de venta (ej: WhatsApp) es crear un adaptador
+
+---
+
+## Comparación: Antes y Después { .smaller }
+
+```{mermaid}
+flowchart LR
+ subgraph subGraph0["Arquitectura Tradicional"]
+    direction LR
+        A2["Servicio con lógica, BD y todo mezclado"]
+        A1["UI"]
+        A3["Base de Datos"]
+  end
+ subgraph subGraph1["Arquitectura Hexagonal"]
+    direction LR
+        B2["Puerto Entrada"]
+        B1["Adaptador UI"]
+        B3["Dominio Puro"]
+        B4["Puerto Salida"]
+        B5["Adaptador BD"]
+  end
+    A1 --> A2
+    A2 --> A3
+    B1 --> B2
+    B2 --> B3
+    B3 --> B4
+    B4 --> B5
+```
+
+---
+
+## Errores Comunes a Evitar { .smaller }
+
+1. **Lógica de negocio en adaptadores**: Los adaptadores solo traducen, no deciden
+2. **Dominio que conoce infraestructura**: El dominio no debe importar clases de BD
+3. **Puertos demasiado específicos**: Los puertos deben ser abstractos
+4. **Saltarse las capas**: No llamar directamente del adaptador al repositorio
+5. **Entidades anémicas**: Las entidades deben tener comportamiento, no solo datos
+
+
+# Cuándo Usar Arquitectura Hexagonal { .smaller }
+
+::: columns
+
+::: {.column width="50%" style="font-size: 0.8em;"}
+**Recomendado cuando**:
+
+- La aplicación tiene lógica de negocio compleja
+- Se anticipa que la tecnología puede cambiar
+- Se requiere alta cobertura de pruebas
+- El equipo es mediano o grande
+- El proyecto tendrá larga vida
+:::
+
+::: {.column width="50%" style="font-size: 0.8em;"}
+**Quizás excesivo para**:
+
+- Prototipos rápidos
+- CRUD simples sin lógica
+- Scripts de una sola ejecución
+:::
+:::
+
+
+
+# Resumen de Conceptos { .smaller }
+
+| **Componente** | **Responsabilidad** | **Ejemplo** |
+|------------|-----------------|---------|
+| Dominio | Lógica de negocio pura | CuentaBancaria, Pedido |
+| Puerto Entrada | Define qué hace la app | GestionCuentasService |
+| Puerto Salida | Define qué necesita la app | CuentaBancariaRepository |
+| Adaptador Primario | Recibe peticiones externas | HttpHandler, Consola |
+| Adaptador Secundario | Conecta con infraestructura | RepositorioEnMemoria |
+
+
+# Conclusión { .smaller }
+
+La Arquitectura Hexagonal organiza el código para que:
+
+- El negocio esté protegido de cambios tecnológicos
+- Las pruebas sean simples y rápidas
+- Los cambios estén localizados
+- El código sea más fácil de entender
+
+La clave está en **invertir las dependencias**: el dominio define qué necesita, y la infraestructura se adapta.
+
+
+# Referencias { .smaller }
+
+- Cockburn, A. (2005). "Hexagonal Architecture"
+- Vernon, V. (2013). "Implementing Domain-Driven Design"
+- Martin, R. (2017). "Clean Architecture"
+
+**Recursos adicionales**:
+
+- https://alistair.cockburn.us/hexagonal-architecture/
+- https://herbertograca.com/2017/11/16/explicit-architecture-01-ddd-hexagonal-onion-clean-cqrs-how-i-put-it-all-together/
