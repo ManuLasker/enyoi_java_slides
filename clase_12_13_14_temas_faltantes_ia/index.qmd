@@ -1,0 +1,1976 @@
+---
+title: Inteligencia Artificial en Java
+subtitle: De ML tradicional a IA Generativa
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard: 
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 500px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "IA en Java - ENYOI"
+---
+
+# Introducción a IA y ML
+
+La **Inteligencia Artificial** está transformando el desarrollo de software.
+
+Java, con su robustez empresarial, se posiciona como una opción sólida para implementar soluciones de IA.
+
+::: {.callout-tip}
+**Navegación**: Usa ↓ para profundizar en un tema, → para pasar al siguiente tema
+:::
+
+---
+
+## ¿Qué es Machine Learning? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Programación Tradicional"
+        D1[Datos] --> P1[Programa]
+        R1[Reglas] --> P1
+        P1 --> S1[Salida]
+    end
+```
+:::
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Machine Learning"
+        D2[Datos] --> P2[Algoritmo ML]
+        S2[Salidas esperadas] --> P2
+        P2 --> R2[Modelo/Reglas]
+    end
+```
+:::
+:::
+
+**Programación tradicional**: Definimos las reglas manualmente  
+**Machine Learning**: El algoritmo aprende las reglas de los datos
+
+---
+
+## IA Generativa vs ML Tradicional {.smaller}
+
+| Aspecto | ML Tradicional | IA Generativa |
+|---------|----------------|---------------|
+| **Objetivo** | Clasificar, predecir | Crear contenido nuevo |
+| **Salida** | Etiquetas, números | Texto, imágenes, código |
+| **Ejemplos** | Spam filter, recomendaciones | ChatGPT, DALL-E, Gemini |
+| **Entrenamiento** | Dataset específico | Enormes corpus de datos |
+| **Uso en Java** | DJL, Weka, Smile | Spring AI, LangChain4j |
+
+---
+
+## Casos de Uso en Java {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**ML Tradicional**
+
+- Detección de fraudes
+- Sistemas de recomendación
+- Predicción de demanda
+- Análisis de sentimientos
+- Visión por computadora
+:::
+
+::: {.column width="50%"}
+**IA Generativa**
+
+- Chatbots inteligentes
+- Generación de documentación
+- Asistentes de código
+- Resumen de textos
+- Análisis de documentos
+:::
+:::
+
+---
+
+## Ecosistema Java para IA {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "IA Generativa"
+        SA[Spring AI]
+        LC[LangChain4j]
+    end
+    
+    subgraph "ML/Deep Learning"
+        DJL[Deep Java Library]
+        TF[TensorFlow Java]
+        ONNX[ONNX Runtime]
+    end
+    
+    subgraph "Proveedores LLM"
+        OAI[OpenAI]
+        GEM[Google Gemini]
+        LITE[LiteLLM Gateway]
+    end
+    
+    SA --> OAI
+    SA --> GEM
+    LC --> OAI
+    LC --> LITE
+    DJL --> TF
+    DJL --> ONNX
+```
+
+
+
+# Configuración del Entorno
+
+Antes de comenzar, veamos que nos ofrece java en cuanto a librerías.
+
+---
+
+## Dependencias Gradle {.smaller}
+
+```groovy
+// build.gradle
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.0'
+    id 'io.spring.dependency-management' version '1.1.5'
+}
+
+dependencies {
+    // Spring AI para IA Generativa
+    implementation 'org.springframework.ai:spring-ai-openai-spring-boot-starter:1.0.0'
+    
+    // LangChain4j
+    implementation 'dev.langchain4j:langchain4j:0.35.0'
+    implementation 'dev.langchain4j:langchain4j-open-ai:0.35.0'
+    
+    // Deep Java Library (DJL)
+    implementation 'ai.djl:api:0.29.0'
+    runtimeOnly 'ai.djl.pytorch:pytorch-engine:0.29.0'
+}
+```
+
+---
+
+## Documentación de las Dependencias {.smaller}
+
+| Librería | Documentación | Repositorio |
+|----------|---------------|-------------|
+| **Spring AI** | [docs.spring.io/spring-ai](https://docs.spring.io/spring-ai/reference/) | [GitHub](https://github.com/spring-projects/spring-ai) |
+| **LangChain4j** | [docs.langchain4j.dev](https://docs.langchain4j.dev/) | [GitHub](https://github.com/langchain4j/langchain4j) |
+| **DJL** | [djl.ai/docs](https://djl.ai/docs/) | [GitHub](https://github.com/deepjavalibrary/djl) |
+| **OpenAI Java** | [platform.openai.com/docs](https://platform.openai.com/docs/api-reference) | [GitHub](https://github.com/openai/openai-java) |
+| **Google Gemini** | [ai.google.dev](https://ai.google.dev/gemini-api/docs) | [Maven](https://mvnrepository.com/artifact/com.google.cloud/google-cloud-vertexai) |
+
+---
+
+## Configuración Spring Boot {.smaller}
+
+```yaml
+# application.yml
+spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4
+          temperature: 0.7
+    
+# Para Google Gemini
+  ai:
+    vertex:
+      ai:
+        project-id: ${GCP_PROJECT_ID}
+        location: us-central1
+```
+
+::: {.callout-warning}
+**Nunca** hardcodees API keys en el código. Usa variables de entorno o gestores de secretos.
+:::
+
+
+
+# Modelos Preentrenados
+
+Los modelos preentrenados nos permiten usar IA sin entrenar desde cero.
+
+---
+
+## ¿Qué son? {.smaller}
+
+```{mermaid}
+graph LR
+    subgraph "Entrenamiento - Proveedor"
+        BD[Big Data] --> E[Entrenamiento]
+        E --> M[Modelo]
+    end
+    
+    subgraph "Uso - Nosotros"
+        M --> D[Descarga/API]
+        D --> I[Inferencia]
+        IN[Nuestros datos] --> I
+        I --> R[Resultados]
+    end
+```
+
+**Ventajas**: Sin costo de entrenamiento, resultados inmediatos, expertise incorporado
+
+---
+
+## Fuentes de Modelos Preentrenados {.smaller}
+
+| Fuente | Tipo | Ejemplos |
+|--------|------|----------|
+| **Hugging Face** | Open Source | BERT, GPT-2, Llama |
+| **OpenAI API** | Comercial | GPT-4, DALL-E |
+| **Google** | Comercial | Gemini, PaLM |
+| **DJL Model Zoo** | Open Source | ResNet, BERT |
+
+
+
+# Ciclo de Vida de un Modelo ML
+
+Entender el ciclo de vida es clave para proyectos de ML exitosos.
+
+---
+
+## Las 6 Fases {.smaller}
+
+```{mermaid}
+graph LR
+    A[Definición<br/>del Problema] --> B[Recolección<br/>de Datos]
+    B --> C[Preprocesamiento]
+    C --> D[Entrenamiento]
+    D --> E[Evaluación]
+    E --> F[Despliegue]
+    F -.-> A
+    E -.->|Iterar| C
+```
+
+---
+
+## Detalle de Cada Fase {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**1. Definición del Problema**
+
+- ¿Qué queremos predecir?
+- ¿Qué métricas de éxito?
+
+**2. Recolección de Datos**
+
+- Fuentes de datos
+- Calidad y cantidad
+
+**3. Preprocesamiento**
+
+- Limpieza
+- Transformaciones
+:::
+
+::: {.column width="50%"}
+**4. Entrenamiento**
+
+- Selección de algoritmo
+- Ajuste de hiperparámetros
+
+**5. Evaluación**
+
+- Métricas (accuracy, F1, etc.)
+- Validación cruzada
+
+**6. Despliegue**
+
+- API REST
+- Batch processing
+:::
+:::
+
+
+
+# Preprocesamiento de Datos
+
+Los datos crudos raramente están listos para usar en modelos de ML.
+
+---
+
+## Técnicas Comunes {.smaller}
+
+```{mermaid}
+graph TB
+    RAW[Datos Crudos] --> CLEAN[Limpieza]
+    CLEAN --> NORM[Normalización]
+    NORM --> ENC[Encoding]
+    ENC --> SPLIT[División Train/Test]
+    SPLIT --> READY[Datos Listos]
+```
+
+---
+
+## Ejemplo con DJL {.smaller}
+
+```java
+// Preparar datos para un modelo de clasificación de imágenes
+public class ImagePreprocessor {
+    
+    public Image preprocess(Image image) {
+        return ImageFactory.getInstance()
+            .fromImage(image)
+            .resize(224, 224)      // Redimensionar
+            .toTensor()            // Convertir a tensor
+            .normalize(            // Normalizar valores
+                new float[]{0.485f, 0.456f, 0.406f},  // mean
+                new float[]{0.229f, 0.224f, 0.225f}   // std
+            );
+    }
+}
+```
+
+::: {.callout-tip}
+El preprocesamiento debe ser **idéntico** en entrenamiento y en producción.
+:::
+
+
+
+# Implementación de Modelos
+
+Veamos cómo implementar modelos de ML en Java usando DJL.
+
+---
+
+## Deep Java Library - DJL {.smaller}
+
+**DJL** es un framework de deep learning para Java desarrollado por AWS.
+
+```java
+// Clasificación de imágenes con modelo preentrenado
+public class ImageClassifier {
+    
+    public Classifications classify(Path imagePath) throws Exception {
+        Image image = ImageFactory.getInstance().fromFile(imagePath);
+        
+        Criteria<Image, Classifications> criteria = Criteria.builder()
+            .setTypes(Image.class, Classifications.class)
+            .optArtifactId("resnet")
+            .optProgress(new ProgressBar())
+            .build();
+        
+        try (ZooModel<Image, Classifications> model = criteria.loadModel();
+             Predictor<Image, Classifications> predictor = model.newPredictor()) {
+            return predictor.predict(image);
+        }
+    }
+}
+```
+
+---
+
+## Detección de Objetos {.smaller}
+
+```java
+public class ObjectDetector {
+    
+    public DetectedObjects detect(Path imagePath) throws Exception {
+        Image image = ImageFactory.getInstance().fromFile(imagePath);
+        
+        Criteria<Image, DetectedObjects> criteria = Criteria.builder()
+            .setTypes(Image.class, DetectedObjects.class)
+            .optArtifactId("ssd")  // Single Shot Detector
+            .optFilter("backbone", "mobilenet")
+            .build();
+        
+        try (ZooModel<Image, DetectedObjects> model = criteria.loadModel();
+             Predictor<Image, DetectedObjects> predictor = model.newPredictor()) {
+            
+            DetectedObjects detected = predictor.predict(image);
+            
+            // Procesar resultados
+            for (DetectedObjects.DetectedObject obj : detected.items()) {
+                System.out.printf("Objeto: %s, Confianza: %.2f%%\n",
+                    obj.getClassName(), obj.getProbability() * 100);
+            }
+            return detected;
+        }
+    }
+}
+```
+
+
+
+# Evaluación de Resultados
+
+¿Cómo sabemos si nuestro modelo funciona bien?
+
+---
+
+## Métricas Principales {.smaller}
+
+| Métrica | Uso | Fórmula |
+|---------|-----|---------|
+| **Accuracy** | Clasificación general | (TP + TN) / Total |
+| **Precision** | Minimizar falsos positivos | TP / (TP + FP) |
+| **Recall** | Minimizar falsos negativos | TP / (TP + FN) |
+| **F1-Score** | Balance precision/recall | 2 × (P × R) / (P + R) |
+
+---
+
+## Matriz de Confusión {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Matriz de Confusión"
+        subgraph "Predicción Positiva"
+            TP["✅ True Positive"]
+            FP["❌ False Positive"]
+        end
+        subgraph "Predicción Negativa"
+            FN["❌ False Negative"]
+            TN["✅ True Negative"]
+        end
+    end
+```
+
+::: {.callout-note}
+**Ejemplo médico**: Un falso negativo (no detectar enfermedad) es más grave que un falso positivo.
+:::
+
+
+
+# Integración con APIs de IA Generativa {.smaller}
+
+Esta sección cubre en detalle cómo integrar LLMs en aplicaciones Java.
+
+Veremos:
+
+- OpenAI (GPT-4)
+- Google Gemini
+- LiteLLM como Gateway
+- Spring AI
+- LangChain4j
+
+---
+
+## Arquitectura General {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Tu Aplicación Java"
+        APP[Spring Boot App]
+        SA[Spring AI / LangChain4j]
+    end
+    
+    subgraph "Gateway - Opcional"
+        LITE[LiteLLM Proxy]
+    end
+    
+    subgraph "Proveedores LLM"
+        OAI[OpenAI GPT-4]
+        GEM[Google Gemini]
+        ANT[Anthropic Claude]
+        LOCAL[Modelos Locales]
+    end
+    
+    APP --> SA
+    SA --> LITE
+    SA -.-> OAI
+    SA -.-> GEM
+    LITE --> OAI
+    LITE --> GEM
+    LITE --> ANT
+    LITE --> LOCAL
+```
+
+
+
+## OpenAI - Configuración {.smaller}
+
+```java
+@Configuration
+public class OpenAIConfig {
+    
+    @Value("${spring.ai.openai.api-key}")
+    private String apiKey;
+    
+    @Bean
+    public OpenAiChatModel chatModel() {
+        return new OpenAiChatModel(
+            new OpenAiApi(apiKey),
+            OpenAiChatOptions.builder()
+                .withModel("gpt-4")
+                .withTemperature(0.7f)
+                .withMaxTokens(2000)
+                .build()
+        );
+    }
+}
+```
+
+---
+
+## OpenAI - Chat Simple {.smaller}
+
+```java
+@Service
+public class ChatService {
+    
+    private final OpenAiChatModel chatModel;
+    
+    public ChatService(OpenAiChatModel chatModel) {
+        this.chatModel = chatModel;
+    }
+    
+    public String chat(String userMessage) {
+        Prompt prompt = new Prompt(userMessage);
+        ChatResponse response = chatModel.call(prompt);
+        return response.getResult().getOutput().getContent();
+    }
+    
+    // Con System Prompt
+    public String chatWithContext(String systemPrompt, String userMessage) {
+        List<Message> messages = List.of(
+            new SystemMessage(systemPrompt),
+            new UserMessage(userMessage)
+        );
+        
+        Prompt prompt = new Prompt(messages);
+        return chatModel.call(prompt).getResult().getOutput().getContent();
+    }
+}
+```
+
+---
+
+## OpenAI - Streaming {.smaller}
+
+```java
+@Service
+public class StreamingChatService {
+    
+    private final OpenAiChatModel chatModel;
+    
+    public Flux<String> streamChat(String userMessage) {
+        Prompt prompt = new Prompt(userMessage);
+        
+        return chatModel.stream(prompt)
+            .map(response -> response.getResult().getOutput().getContent())
+            .filter(content -> content != null);
+    }
+}
+
+// En el Controller
+@GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+public Flux<String> streamChat(@RequestParam String message) {
+    return streamingChatService.streamChat(message);
+}
+```
+
+::: {.callout-tip}
+El streaming mejora la experiencia de usuario al mostrar respuestas progresivamente.
+:::
+
+---
+
+## OpenAI - Function Calling {.smaller}
+
+```java
+// Definir funciones que el LLM puede invocar
+public record WeatherFunction(
+    @JsonProperty("location") String location,
+    @JsonProperty("unit") String unit
+) {}
+
+@Service
+public class FunctionCallingService {
+    
+    @Bean
+    public FunctionCallback weatherFunction() {
+        return FunctionCallback.builder()
+            .function("getWeather", (WeatherFunction request) -> {
+                // Llamar a API de clima real
+                return "El clima en " + request.location() + " es soleado, 25°C";
+            })
+            .description("Obtiene el clima actual de una ubicación")
+            .inputType(WeatherFunction.class)
+            .build();
+    }
+    
+    public String chatWithFunctions(String userMessage) {
+        OpenAiChatOptions options = OpenAiChatOptions.builder()
+            .withFunctions(Set.of("getWeather"))
+            .build();
+        
+        Prompt prompt = new Prompt(userMessage, options);
+        return chatModel.call(prompt).getResult().getOutput().getContent();
+    }
+}
+```
+
+
+
+## Google Gemini - Configuración {.smaller}
+
+```yaml
+# application.yml
+spring:
+  ai:
+    vertex:
+      ai:
+        project-id: ${GCP_PROJECT_ID}
+        location: us-central1
+```
+
+```java
+@Configuration
+public class GeminiConfig {
+    
+    @Bean
+    public VertexAiGeminiChatModel geminiChatModel() {
+        return new VertexAiGeminiChatModel(
+            VertexAiGeminiChatOptions.builder()
+                .withModel("gemini-pro")
+                .withTemperature(0.7f)
+                .build()
+        );
+    }
+}
+```
+
+---
+
+## Google Gemini - Multimodal {.smaller}
+
+```java
+@Service
+public class GeminiMultimodalService {
+    
+    private final VertexAiGeminiChatModel geminiModel;
+    
+    // Gemini puede procesar imágenes + texto
+    public String analyzeImage(byte[] imageBytes, String question) {
+        
+        UserMessage userMessage = new UserMessage(
+            question,
+            List.of(new Media(MimeTypeUtils.IMAGE_PNG, imageBytes))
+        );
+        
+        Prompt prompt = new Prompt(List.of(userMessage));
+        return geminiModel.call(prompt).getResult().getOutput().getContent();
+    }
+    
+    // Ejemplo de uso
+    public String describeProduct(Path imagePath) throws IOException {
+        byte[] imageBytes = Files.readAllBytes(imagePath);
+        return analyzeImage(
+            imageBytes, 
+            "Describe este producto para un e-commerce. " +
+            "Incluye características, materiales y posibles usos."
+        );
+    }
+}
+```
+
+---
+
+## Gemini vs OpenAI {.smaller}
+
+| Característica | OpenAI GPT-4 | Google Gemini |
+|----------------|--------------|---------------|
+| **Multimodal** | GPT-4V (imágenes) | Nativo (imágenes, video) |
+| **Contexto** | 128K tokens | 1M tokens (Gemini 1.5) |
+| **Velocidad** | Medio | Rápido |
+| **Costo** | \$\$\$\$ | \$\$\$ |
+| **Integración GCP** | Manual | Nativa |
+| **Fortaleza** | Razonamiento | Contexto largo |
+
+
+
+## LiteLLM - Gateway Unificado {.smaller}
+
+**LiteLLM** actúa como un proxy que unifica múltiples proveedores de LLM bajo una sola API.
+
+```{mermaid}
+graph LR
+    subgraph "Tu App"
+        APP[Java App]
+    end
+    
+    subgraph "LiteLLM Proxy"
+        PROXY[API Unificada]
+        LB[Load Balancer]
+        CACHE[Response Cache]
+    end
+    
+    subgraph "Proveedores"
+        O[OpenAI]
+        G[Gemini]
+        A[Anthropic]
+        L[Llama Local]
+    end
+    
+    APP --> PROXY
+    PROXY --> LB
+    LB --> O
+    LB --> G
+    LB --> A
+    LB --> L
+```
+
+---
+
+## LiteLLM - Configuración {.smaller}
+
+```yaml
+# config.yaml para LiteLLM
+model_list:
+  - model_name: gpt-4
+    litellm_params:
+      model: openai/gpt-4
+      api_key: ${OPENAI_API_KEY}
+      
+  - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-pro
+      api_key: ${GOOGLE_API_KEY}
+      
+  - model_name: claude-3
+    litellm_params:
+      model: anthropic/claude-3-opus
+      api_key: ${ANTHROPIC_API_KEY}
+
+general_settings:
+  master_key: sk-your-proxy-key
+```
+
+```bash
+# Iniciar LiteLLM
+pip install litellm[proxy]
+litellm --config config.yaml
+```
+
+---
+
+## LiteLLM - Integración Java {.smaller}
+
+```java
+@Configuration
+public class LiteLLMConfig {
+    
+    @Bean
+    public OpenAiChatModel litellmChatModel() {
+        // LiteLLM expone API compatible con OpenAI
+        return new OpenAiChatModel(
+            new OpenAiApi("http://localhost:4000", "sk-your-proxy-key"),
+            OpenAiChatOptions.builder()
+                .withModel("gpt-4")  // o "gemini-pro", "claude-3"
+                .build()
+        );
+    }
+}
+
+@Service
+public class UnifiedChatService {
+    
+    private final OpenAiChatModel chatModel;
+    
+    // Cambiar de modelo es solo cambiar el string
+    public String chat(String message, String modelName) {
+        OpenAiChatOptions options = OpenAiChatOptions.builder()
+            .withModel(modelName)  // "gpt-4", "gemini-pro", "claude-3"
+            .build();
+        
+        Prompt prompt = new Prompt(message, options);
+        return chatModel.call(prompt).getResult().getOutput().getContent();
+    }
+}
+```
+
+---
+
+## Ventajas de LiteLLM {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Operacionales**
+
+- ✅ API unificada (OpenAI compatible)
+- ✅ Fallback automático entre proveedores
+- ✅ Load balancing
+- ✅ Caché de respuestas
+- ✅ Rate limiting
+:::
+
+::: {.column width="50%"}
+**Desarrollo**
+
+- ✅ Cambiar proveedor sin cambiar código
+- ✅ A/B testing de modelos
+- ✅ Logging centralizado
+- ✅ Control de costos
+- ✅ Soporte para modelos locales
+:::
+:::
+
+
+
+## Spring AI - Framework Oficial {.smaller}
+
+**Spring AI** es el framework oficial de Spring para integrar IA.
+
+```{mermaid}
+graph TB
+    subgraph "Spring AI"
+        CHAT[Chat Client]
+        EMB[Embeddings]
+        VS[Vector Store]
+        RAG[RAG Support]
+        FUNC[Function Calling]
+    end
+    
+    subgraph "Providers"
+        OAI[OpenAI]
+        GEM[Vertex AI]
+        ANT[Anthropic]
+        OLL[Ollama]
+    end
+    
+    CHAT --> OAI
+    CHAT --> GEM
+    EMB --> OAI
+    EMB --> GEM
+    VS --> RAG
+```
+
+---
+
+## Spring AI - Chat Client Fluent API {.smaller}
+
+```java
+@Service
+public class SpringAIChatService {
+    
+    private final ChatClient chatClient;
+    
+    public SpringAIChatService(ChatClient.Builder builder) {
+        this.chatClient = builder
+            .defaultSystem("Eres un asistente experto en programación Java.")
+            .build();
+    }
+    
+    // API Fluida y expresiva
+    public String generateCode(String description) {
+        return chatClient.prompt()
+            .user(u -> u.text("Genera código Java para: {description}")
+                        .param("description", description))
+            .call()
+            .content();
+    }
+    
+    // Con historial de conversación
+    public String chatWithHistory(List<Message> history, String newMessage) {
+        return chatClient.prompt()
+            .messages(history)
+            .user(newMessage)
+            .call()
+            .content();
+    }
+}
+```
+
+---
+
+## Spring AI - Output Parsing {.smaller}
+
+```java
+// Parsear respuestas estructuradas automáticamente
+public record ProductAnalysis(
+    String name,
+    String category,
+    List<String> features,
+    double estimatedPrice
+) {}
+
+@Service
+public class StructuredOutputService {
+    
+    private final ChatClient chatClient;
+    
+    public ProductAnalysis analyzeProduct(String description) {
+        return chatClient.prompt()
+            .user("Analiza este producto: " + description)
+            .call()
+            .entity(ProductAnalysis.class);  // Parseo automático a Java Record
+    }
+    
+    // Lista de entidades
+    public List<ProductAnalysis> analyzeProducts(String catalog) {
+        return chatClient.prompt()
+            .user("Analiza estos productos: " + catalog)
+            .call()
+            .entity(new ParameterizedTypeReference<List<ProductAnalysis>>() {});
+    }
+}
+```
+
+
+
+## LangChain4j - Alternativa Potente {.smaller}
+
+**LangChain4j** es el port de LangChain a Java, con características avanzadas.
+
+```java
+// Configuración básica
+ChatLanguageModel model = OpenAiChatModel.builder()
+    .apiKey(System.getenv("OPENAI_API_KEY"))
+    .modelName("gpt-4")
+    .temperature(0.7)
+    .build();
+
+// Chat simple
+String response = model.generate("Explica qué es Spring Boot");
+```
+
+---
+
+## LangChain4j - AI Services {.smaller}
+
+```java
+// Definir interfaz - LangChain4j genera la implementación
+public interface CodeAssistant {
+    
+    @SystemMessage("Eres un experto en Java y Spring Boot")
+    String answerQuestion(String question);
+    
+    @SystemMessage("""
+        Genera código Java limpio y documentado.
+        Sigue las mejores prácticas de Spring Boot.
+        """)
+    @UserMessage("Crea un {{component}} para {{functionality}}")
+    String generateCode(@V("component") String component, 
+                        @V("functionality") String functionality);
+}
+
+// Uso
+CodeAssistant assistant = AiServices.builder(CodeAssistant.class)
+    .chatLanguageModel(model)
+    .build();
+
+String code = assistant.generateCode("Repository", "gestionar usuarios");
+```
+
+---
+
+## LangChain4j - Memory {.smaller}
+
+```java
+// Memoria de conversación
+public interface ConversationalAssistant {
+    String chat(String message);
+}
+
+// Con memoria persistente
+ChatMemory chatMemory = MessageWindowChatMemory.withMaxMessages(20);
+
+ConversationalAssistant assistant = AiServices.builder(ConversationalAssistant.class)
+    .chatLanguageModel(model)
+    .chatMemory(chatMemory)
+    .build();
+
+// La conversación mantiene contexto
+assistant.chat("Me llamo Juan");
+assistant.chat("¿Cómo me llamo?");  // "Te llamas Juan"
+
+// Memoria persistente con base de datos
+ChatMemoryStore store = new PersistentChatMemoryStore(jdbcTemplate);
+ChatMemory persistentMemory = MessageWindowChatMemory.builder()
+    .chatMemoryStore(store)
+    .maxMessages(100)
+    .build();
+```
+
+---
+
+## LangChain4j - Tools {.smaller}
+
+```java
+// Definir herramientas que el LLM puede usar
+public class CalculatorTool {
+    
+    @Tool("Suma dos números")
+    public double add(double a, double b) {
+        return a + b;
+    }
+    
+    @Tool("Consulta el precio de un producto en la base de datos")
+    public double getProductPrice(String productId) {
+        return productRepository.findById(productId)
+            .map(Product::getPrice)
+            .orElse(0.0);
+    }
+}
+
+// Registrar herramientas
+Assistant assistant = AiServices.builder(Assistant.class)
+    .chatLanguageModel(model)
+    .tools(new CalculatorTool())
+    .build();
+
+// El LLM decide cuándo usar las herramientas
+assistant.chat("¿Cuánto cuesta el producto ABC-123?");
+// Internamente llama a getProductPrice("ABC-123")
+```
+
+
+
+# Patrones de Arquitectura para IA en Java {.smaller}
+
+En esta sección cubriremos patrones esenciales:
+
+1. **RAG** (Retrieval Augmented Generation)
+2. **Embeddings y Vector Databases**
+3. **Chain/Pipeline Patterns**
+
+---
+
+## ¿Por qué Patrones? {.smaller}
+::: columns
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Sin Patrones"
+        U1[Usuario] --> L1[LLM]
+        L1 --> R1[Respuesta<br/>Genérica]
+    end
+```
+::: 
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Con Patrones"
+        U2[Usuario] --> P[Pipeline]
+        P --> DB[(Datos Propios)]
+        P --> L2[LLM + Contexto]
+        L2 --> R2[Respuesta<br/>Precisa]
+    end
+```
+::: 
+:::
+
+## Los patrones permiten: { .smaller }
+
+- Usar datos propios y actualizados
+- Reducir alucinaciones
+- Controlar el comportamiento
+- Escalar la solución
+
+
+
+## Embeddings - Concepto {.smaller}
+
+Los **embeddings** son representaciones numéricas (vectores) de texto que capturan su significado semántico.
+
+```{mermaid}
+graph LR
+    T1["Perro"] --> E[Modelo de<br/>Embeddings]
+    T2["Canino"] --> E
+    T3["Computadora"] --> E
+    
+    E --> V1["[0.2, -0.5, 0.8, ...]"]
+    E --> V2["[0.19, -0.48, 0.82, ...]"]
+    E --> V3["[-0.7, 0.3, -0.1, ...]"]
+```
+
+**Propiedad clave**: Textos con significado similar tienen vectores cercanos.
+
+---
+
+## Embeddings en Java {.smaller}
+
+```java
+@Service
+public class EmbeddingService {
+    
+    private final EmbeddingModel embeddingModel;
+    
+    public EmbeddingService(EmbeddingModel embeddingModel) {
+        this.embeddingModel = embeddingModel;
+    }
+    
+    // Generar embedding de un texto
+    public float[] embed(String text) {
+        EmbeddingResponse response = embeddingModel.call(
+            new EmbeddingRequest(List.of(text), EmbeddingOptions.EMPTY)
+        );
+        return response.getResult().getOutput();
+    }
+    
+    // Calcular similitud entre dos textos
+    public double similarity(String text1, String text2) {
+        float[] emb1 = embed(text1);
+        float[] emb2 = embed(text2);
+        return cosineSimilarity(emb1, emb2);
+    }
+    
+    private double cosineSimilarity(float[] a, float[] b) {
+        double dotProduct = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.length; i++) {
+            dotProduct += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+}
+```
+
+---
+
+## Vector Databases {.smaller}
+
+Las **bases de datos vectoriales** están optimizadas para almacenar y buscar embeddings.
+
+```{mermaid}
+graph LR
+    subgraph Indexación
+        direction TB
+        DOC[Documentos] --> CHUNK[Chunking]
+        CHUNK --> EMB[Embeddings]
+        EMB --> VDB[(Vector DB)]
+    end
+    
+    subgraph Búsqueda
+        direction TB
+        Q[Query] --> QEMB[Query Embedding]
+        QEMB --> SEARCH[Búsqueda ANN]
+        SEARCH --> TOP[Top K Resultados]
+    end
+
+    %% Conexión entre los dos bloques
+    VDB --> SEARCH
+```
+
+---
+
+## Vector Stores en Spring AI {.smaller}
+
+```java
+@Configuration
+public class VectorStoreConfig {
+    
+    // Usando PGVector (PostgreSQL)
+    @Bean
+    public VectorStore vectorStore(JdbcTemplate jdbcTemplate, 
+                                    EmbeddingModel embeddingModel) {
+        return new PgVectorStore(jdbcTemplate, embeddingModel);
+    }
+}
+
+@Service
+public class DocumentService {
+    
+    private final VectorStore vectorStore;
+    
+    // Indexar documentos
+    public void indexDocuments(List<Document> documents) {
+        vectorStore.add(documents);
+    }
+    
+    // Búsqueda semántica
+    public List<Document> search(String query, int topK) {
+        return vectorStore.similaritySearch(
+            SearchRequest.query(query).withTopK(topK)
+        );
+    }
+}
+```
+
+---
+
+## Opciones de Vector Databases {.smaller}
+
+| Base de Datos | Tipo | Características |
+|---------------|------|-----------------|
+| **PGVector** | SQL Extension | Integra con PostgreSQL existente |
+| **Pinecone** | Cloud Native | Serverless, escalable |
+| **Weaviate** | Open Source | GraphQL, multi-modal |
+| **Milvus** | Open Source | Alto rendimiento |
+| **Chroma** | Open Source | Simple, para desarrollo |
+| **Redis** | In-Memory | Ultra rápido |
+
+
+
+## RAG - Retrieval Augmented Generation {.smaller}
+
+**RAG** combina búsqueda de información con generación de texto para respuestas precisas y actualizadas.
+
+```{mermaid}
+graph LR
+    subgraph "1. Indexación Offline"
+        D[Documentos] --> C[Chunking]
+        C --> E[Embeddings]
+        E --> V[(Vector Store)]
+    end
+    
+    subgraph "2. Consulta Online"
+        Q[Pregunta] --> QE[Query Embedding]
+        QE --> S[Similarity Search]
+        V --> S
+        S --> CTX[Contexto Relevante]
+        CTX --> P[Prompt + Contexto]
+        Q --> P
+        P --> LLM[LLM]
+        LLM --> R[Respuesta]
+    end
+```
+
+---
+
+## RAG - Paso 1: Chunking {.smaller}
+
+```java
+@Service
+public class DocumentChunker {
+    
+    // Dividir documentos en chunks manejables
+    public List<Document> chunkDocument(String content, String source) {
+        
+        // Estrategia: chunks de 1000 caracteres con 200 de overlap
+        TokenTextSplitter splitter = new TokenTextSplitter(
+            1000,   // chunk size
+            200,    // overlap
+            5,      // min chunk size
+            10000,  // max tokens
+            true    // keep separator
+        );
+        
+        List<String> chunks = splitter.split(content);
+        
+        return chunks.stream()
+            .map(chunk -> new Document(chunk, Map.of(
+                "source", source,
+                "timestamp", Instant.now().toString()
+            )))
+            .toList();
+    }
+}
+```
+
+::: {.callout-tip}
+El **overlap** ayuda a mantener contexto entre chunks.
+:::
+
+---
+
+## RAG - Paso 2: Indexación {.smaller}
+
+```java
+@Service
+public class RAGIndexingService {
+    
+    private final VectorStore vectorStore;
+    private final DocumentChunker chunker;
+    
+    // Indexar un documento PDF
+    public void indexPdf(Path pdfPath) throws IOException {
+        // Extraer texto del PDF
+        PDDocument document = PDDocument.load(pdfPath.toFile());
+        PDFTextStripper stripper = new PDFTextStripper();
+        String content = stripper.getText(document);
+        document.close();
+        
+        // Dividir en chunks
+        List<Document> chunks = chunker.chunkDocument(
+            content, 
+            pdfPath.getFileName().toString()
+        );
+        
+        // Almacenar en vector store (embeddings generados automáticamente)
+        vectorStore.add(chunks);
+        
+        log.info("Indexados {} chunks del documento {}", 
+            chunks.size(), pdfPath.getFileName());
+    }
+}
+```
+
+---
+
+## RAG - Paso 3: Consulta {.smaller}
+
+```java
+@Service
+public class RAGQueryService {
+    
+    private final VectorStore vectorStore;
+    private final ChatClient chatClient;
+    
+    public String query(String question) {
+        // 1. Buscar documentos relevantes
+        List<Document> relevantDocs = vectorStore.similaritySearch(
+            SearchRequest.query(question)
+                .withTopK(5)
+                .withSimilarityThreshold(0.7)
+        );
+        
+        // 2. Construir contexto
+        String context = relevantDocs.stream()
+            .map(Document::getContent)
+            .collect(Collectors.joining("\n\n---\n\n"));
+        
+        // 3. Generar respuesta con contexto
+        return chatClient.prompt()
+            .system("""
+                Responde basándote ÚNICAMENTE en el contexto proporcionado.
+                Si la información no está en el contexto, di que no lo sabes.
+                Cita las fuentes cuando sea posible.
+                """)
+            .user(u -> u.text("""
+                Contexto:
+                {context}
+                
+                Pregunta: {question}
+                """)
+                .param("context", context)
+                .param("question", question))
+            .call()
+            .content();
+    }
+}
+```
+
+---
+
+## RAG con Spring AI Advisors {.smaller}
+
+```java
+// Spring AI simplifica RAG con Advisors
+@Service
+public class SimpleRAGService {
+    
+    private final ChatClient chatClient;
+    private final VectorStore vectorStore;
+    
+    public SimpleRAGService(ChatClient.Builder builder, VectorStore vectorStore) {
+        this.vectorStore = vectorStore;
+        
+        // Configurar RAG como advisor
+        this.chatClient = builder
+            .defaultAdvisors(
+                new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults())
+            )
+            .build();
+    }
+    
+    // El advisor maneja automáticamente la búsqueda y el contexto
+    public String ask(String question) {
+        return chatClient.prompt()
+            .user(question)
+            .call()
+            .content();
+    }
+}
+```
+
+::: {.callout-note}
+Los **Advisors** en Spring AI interceptan y enriquecen las peticiones automáticamente.
+:::
+
+---
+
+## RAG - Arquitectura Completa {.smaller}
+
+::: { style="height: 400px; width: 400px;" }
+```{mermaid}
+%%|fig-responsive: false
+graph TB
+    subgraph "Fuentes de Datos"
+        PDF[PDFs]
+        WEB[Páginas Web]
+        DB[(Base de Datos)]
+        API[APIs]
+    end
+    
+    subgraph "Pipeline de Indexación"
+        ETL[ETL / Loaders]
+        CHUNK[Chunking]
+        EMBED[Embedding Model]
+        VS[(Vector Store)]
+    end
+    
+    subgraph "Pipeline de Consulta"
+        USER[Usuario]
+        REWRITE[Query Rewriting]
+        RETRIEVE[Retrieval]
+        RERANK[Re-ranking]
+        GEN[Generation]
+    end
+    
+    PDF --> ETL
+    WEB --> ETL
+    DB --> ETL
+    API --> ETL
+    ETL --> CHUNK --> EMBED --> VS
+    
+    USER --> REWRITE --> RETRIEVE
+    VS --> RETRIEVE
+    RETRIEVE --> RERANK --> GEN
+    GEN --> USER
+```
+:::
+
+
+
+## Chain/Pipeline Patterns {.smaller}
+
+Los **pipelines** permiten componer operaciones de IA en flujos complejos.
+
+```{mermaid}
+graph LR
+    I[Input] --> S1[Step 1:<br/>Validación]
+    S1 --> S2[Step 2:<br/>Enriquecimiento]
+    S2 --> S3[Step 3:<br/>LLM Call]
+    S3 --> S4[Step 4:<br/>Post-proceso]
+    S4 --> O[Output]
+```
+
+---
+
+## Chain Pattern - Implementación {.smaller}
+
+```java
+// Interfaz base para pasos del pipeline
+public interface PipelineStep<I, O> {
+    O process(I input);
+    
+    default <R> PipelineStep<I, R> andThen(PipelineStep<O, R> next) {
+        return input -> next.process(this.process(input));
+    }
+}
+
+// Implementaciones de pasos
+public class ValidationStep implements PipelineStep<String, String> {
+    public String process(String input) {
+        if (input == null || input.isBlank()) {
+            throw new IllegalArgumentException("Input vacío");
+        }
+        return input.trim();
+    }
+}
+
+public class TranslationStep implements PipelineStep<String, String> {
+    private final ChatClient chatClient;
+    
+    public String process(String input) {
+        return chatClient.prompt()
+            .user("Traduce al inglés: " + input)
+            .call()
+            .content();
+    }
+}
+```
+
+---
+
+## Pipeline Completo {.smaller}
+
+```java
+@Service
+public class DocumentProcessingPipeline {
+    
+    private final PipelineStep<String, String> pipeline;
+    
+    public DocumentProcessingPipeline(ChatClient chatClient, VectorStore vs) {
+        this.pipeline = new ValidationStep()
+            .andThen(new CleaningStep())
+            .andThen(new SummarizationStep(chatClient))
+            .andThen(new EntityExtractionStep(chatClient))
+            .andThen(new IndexingStep(vs));
+    }
+    
+    public String process(String document) {
+        return pipeline.process(document);
+    }
+}
+
+// Uso
+String result = pipeline.process(rawDocument);
+```
+
+---
+
+## Router Pattern {.smaller}
+
+```java
+// Enrutar consultas a diferentes especialistas
+@Service
+public class QueryRouter {
+    
+    private final ChatClient classifier;
+    private final Map<String, ChatClient> specialists;
+    
+    public String route(String query) {
+        // 1. Clasificar la consulta
+        String category = classifier.prompt()
+            .user("""
+                Clasifica esta consulta en una categoría:
+                - TECHNICAL: Preguntas de código o arquitectura
+                - BUSINESS: Preguntas de negocio o procesos
+                - SUPPORT: Problemas o errores
+                
+                Consulta: %s
+                
+                Responde SOLO con la categoría.
+                """.formatted(query))
+            .call()
+            .content()
+            .trim();
+        
+        // 2. Enrutar al especialista
+        ChatClient specialist = specialists.getOrDefault(category, 
+            specialists.get("GENERAL"));
+        
+        return specialist.prompt()
+            .user(query)
+            .call()
+            .content();
+    }
+}
+```
+
+---
+
+## Parallel Pattern {.smaller}
+
+```java
+@Service
+public class ParallelAnalysisService {
+    
+    private final ChatClient chatClient;
+    
+    // Ejecutar múltiples análisis en paralelo
+    public AnalysisResult analyzeDocument(String document) {
+        
+        CompletableFuture<String> sentimentFuture = CompletableFuture.supplyAsync(
+            () -> analyzeSentiment(document)
+        );
+        
+        CompletableFuture<List<String>> entitiesFuture = CompletableFuture.supplyAsync(
+            () -> extractEntities(document)
+        );
+        
+        CompletableFuture<String> summaryFuture = CompletableFuture.supplyAsync(
+            () -> summarize(document)
+        );
+        
+        // Esperar todos los resultados
+        return CompletableFuture.allOf(sentimentFuture, entitiesFuture, summaryFuture)
+            .thenApply(v -> new AnalysisResult(
+                sentimentFuture.join(),
+                entitiesFuture.join(),
+                summaryFuture.join()
+            ))
+            .join();
+    }
+}
+```
+
+---
+
+## Retry y Fallback Pattern {.smaller}
+
+```java
+@Service
+public class ResilientAIService {
+    
+    private final List<ChatClient> providers; // GPT-4, Gemini, Claude
+    
+    @Retryable(maxAttempts = 3, backoff = @Backoff(delay = 1000))
+    public String chatWithRetry(String message) {
+        return primaryProvider.prompt()
+            .user(message)
+            .call()
+            .content();
+    }
+    
+    // Fallback entre proveedores
+    public String chatWithFallback(String message) {
+        for (ChatClient provider : providers) {
+            try {
+                return provider.prompt()
+                    .user(message)
+                    .call()
+                    .content();
+            } catch (Exception e) {
+                log.warn("Provider falló, intentando siguiente: {}", e.getMessage());
+            }
+        }
+        throw new AIServiceUnavailableException("Todos los proveedores fallaron");
+    }
+}
+```
+
+
+
+# Arquitectura Completa de IA en Java {.smaller}
+
+Uniendo todos los conceptos en una arquitectura de producción.
+
+---
+
+## Diagrama de Arquitectura {.smaller}
+
+::: { style="height: 650px; width: 700px;" }
+```{mermaid}
+%%|fig-responsive: false
+graph TB
+    subgraph "Capa de Presentación"
+        WEB[Web App]
+        API[REST API]
+        WS[WebSocket]
+    end
+    
+    subgraph "Capa de Aplicación"
+        CTRL[Controllers]
+        SVC[AI Services]
+        PIPE[Pipelines]
+    end
+    
+    subgraph "Capa de IA"
+        CHAT[Chat Service]
+        RAG[RAG Service]
+        EMB[Embedding Service]
+    end
+    
+    subgraph "Capa de Datos"
+        VS[(Vector Store)]
+        DB[(PostgreSQL)]
+        CACHE[(Redis Cache)]
+    end
+    
+    subgraph "Proveedores Externos"
+        LLM[LiteLLM Gateway]
+        OAI[OpenAI]
+        GEM[Gemini]
+    end
+    
+    WEB --> CTRL
+    API --> CTRL
+    WS --> CTRL
+    CTRL --> SVC
+    SVC --> PIPE
+    PIPE --> CHAT
+    PIPE --> RAG
+    RAG --> EMB
+    EMB --> VS
+    CHAT --> LLM
+    RAG --> LLM
+    LLM --> OAI
+    LLM --> GEM
+    SVC --> DB
+    SVC --> CACHE
+```
+:::
+
+---
+
+## Ejemplo Completo - Config {.smaller}
+
+```java
+@Configuration
+public class AIConfig {
+    
+    @Bean
+    public ChatClient chatClient(ChatClient.Builder builder,
+                                  VectorStore vectorStore) {
+        return builder
+            .defaultSystem("""
+                Eres un asistente de documentación técnica.
+                Responde basándote en la documentación proporcionada.
+                Si no sabes algo, dilo claramente.
+                """)
+            .defaultAdvisors(
+                new QuestionAnswerAdvisor(vectorStore),
+                new MessageChatMemoryAdvisor(new InMemoryChatMemory())
+            )
+            .build();
+    }
+    
+    @Bean
+    public VectorStore vectorStore(JdbcTemplate jdbc, EmbeddingModel emb) {
+        return new PgVectorStore(jdbc, emb, 
+            PgVectorStore.PgVectorStoreConfig.builder()
+                .withDimensions(1536)
+                .withIndexType(PgVectorStore.PgIndexType.HNSW)
+                .build());
+    }
+}
+```
+
+---
+
+## Ejemplo Completo - Service {.smaller}
+
+```java
+@Service
+@Slf4j
+public class DocumentAssistantService {
+    
+    private final ChatClient chatClient;
+    private final VectorStore vectorStore;
+    private final TokenTextSplitter splitter;
+    
+    // Ingestar documentos
+    @Transactional
+    public void ingestDocument(MultipartFile file) throws IOException {
+        String content = extractContent(file);
+        List<Document> chunks = splitter.apply(List.of(new Document(content)));
+        
+        // Agregar metadata
+        chunks.forEach(chunk -> chunk.getMetadata().put(
+            "filename", file.getOriginalFilename()
+        ));
+        
+        vectorStore.add(chunks);
+        log.info("Documento {} indexado con {} chunks", 
+            file.getOriginalFilename(), chunks.size());
+    }
+    
+    // Consultar
+    public Flux<String> askStreaming(String question, String sessionId) {
+        return chatClient.prompt()
+            .user(question)
+            .advisors(a -> a.param("chat_memory_session_id", sessionId))
+            .stream()
+            .content();
+    }
+}
+```
+
+---
+
+## Ejemplo Completo - Controller {.smaller}
+
+```java
+@RestController
+@RequestMapping("/api/assistant")
+public class AssistantController {
+    
+    private final DocumentAssistantService service;
+    
+    @PostMapping("/documents")
+    public ResponseEntity<String> uploadDocument(
+            @RequestParam("file") MultipartFile file) throws IOException {
+        service.ingestDocument(file);
+        return ResponseEntity.ok("Documento indexado exitosamente");
+    }
+    
+    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> chat(
+            @RequestParam String question,
+            @RequestParam(defaultValue = "default") String sessionId) {
+        return service.askStreaming(question, sessionId);
+    }
+    
+    @GetMapping("/chat/sync")
+    public String chatSync(
+            @RequestParam String question,
+            @RequestParam(defaultValue = "default") String sessionId) {
+        return service.ask(question, sessionId);
+    }
+}
+```
+
+
+
+# Mejores Prácticas {.smaller}
+
+Recomendaciones para producción.
+
+---
+
+## Seguridad {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Prompt Injection**
+
+- Sanitizar inputs del usuario
+- Escapar caracteres especiales (`system:`, `assistant:`)
+- Limitar longitud de prompts
+- No concatenar inputs directamente
+- Usar templates con placeholders
+:::
+
+::: {.column width="50%"}
+**Protección de Datos**
+
+- Nunca enviar datos sensibles al LLM
+- Validar respuestas antes de mostrar
+- Filtrar PII (datos personales)
+- No exponer API keys en frontend
+- Usar variables de entorno o vaults
+:::
+:::
+
+::: {.callout-warning}
+Los LLMs pueden ser manipulados para revelar información. **Siempre valida** entradas y salidas.
+:::
+
+---
+
+## Observabilidad {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Métricas a Monitorear**
+
+- **Latencia** por request/modelo
+- **Tokens** consumidos (input/output)
+- **Tasa de errores** por proveedor
+- **Costos** acumulados por día/mes
+- **Cache hit rate** si usas caché
+:::
+
+::: {.column width="50%"}
+**Herramientas Recomendadas**
+
+- **Micrometer** + Prometheus
+- **Spring Boot Actuator**
+- **Grafana** para dashboards
+- **LiteLLM Dashboard** (built-in)
+- **Langfuse** para trazabilidad LLM
+:::
+:::
+
+::: {.callout-tip}
+**LiteLLM** incluye dashboard de observabilidad con métricas de uso, latencia y costos por modelo.
+:::
+
+---
+
+## Control de Costos {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Estrategias de Optimización**
+
+- Usar modelos más baratos para tareas simples
+- Implementar **caché** de respuestas
+- Limitar tokens máximos por request
+- **Rate limiting** por usuario/API
+- Comprimir contexto en RAG
+:::
+
+::: {.column width="50%"}
+**Presupuestos y Límites**
+
+- **OpenAI**: Usage limits en dashboard
+- **Google Cloud**: Budget alerts
+- **LiteLLM**: Budgets por usuario/team
+- **Anthropic**: Spend limits por org
+- Alertas cuando se alcanza 80% del budget
+:::
+:::
+
+---
+
+## Control de Costos con LiteLLM {.smaller}
+
+**LiteLLM** ofrece control de presupuestos centralizado:
+
+- **Budgets por API key** - Limitar gasto por aplicación
+- **Budgets por usuario** - Control granular de costos
+- **Budgets por equipo** - Para organizaciones grandes
+- **Rate limits** - Requests por minuto/hora
+- **Alertas automáticas** - Notificaciones al alcanzar límites
+- **Dashboard de costos** - Visualización en tiempo real
+
+```yaml
+# Ejemplo config LiteLLM con budgets
+litellm_settings:
+  max_budget: 100  # USD máximo
+  budget_duration: monthly
+```
+
+::: {.callout-note}
+Cada proveedor (OpenAI, Google, Anthropic) también permite configurar **budgets y alertas** directamente en su consola de administración.
+:::
+
+
+
+# Resumen y Próximos Pasos
+
+---
+
+## Lo que Aprendimos {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Fundamentos**
+
+- Conceptos de ML vs IA Generativa
+- Ciclo de vida de modelos
+- Configuración del entorno
+- DJL para ML tradicional
+:::
+
+::: {.column width="50%"}
+**IA Generativa**
+
+- OpenAI y Google Gemini
+- LiteLLM como gateway
+- Spring AI y LangChain4j
+- RAG y Vector Databases
+- Patrones de arquitectura
+:::
+:::
+
+---
+
+## Recursos Adicionales {.smaller}
+
+| Recurso | URL |
+|---------|-----|
+| Spring AI Docs | [spring-ai](spring.io/projects/spring-ai) |
+| LangChain4j | [langchain4j](docs.langchain4j.dev) |
+| Deep Java Library | [deep-java-library](djl.ai) |
+| LiteLLM | [litellm](docs.litellm.ai) |
+| OpenAI Docs | [openai-docs](platform.openai.com/docs) |
+| Google AI | [google-gemini](ai.google.dev) |
+
+---
+
+## Ejercicio Final {.smaller}
+
+Construir un **Asistente RAG** que:
+
+1. Ingeste documentos PDF de la documentación de Spring Boot
+2. Permita hacer preguntas sobre Spring Boot
+3. Responda citando las fuentes
+4. Mantenga historial de conversación
+
+**Bonus**:
+
+- Implementar streaming de respuestas
+- Agregar fallback entre OpenAI y Gemini
+- Métricas con Micrometer
+
+---
+
+## ¡Gracias! {.smaller}
+
+**¿Preguntas?**
