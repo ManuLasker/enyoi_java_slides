@@ -1,0 +1,2364 @@
+---
+title: Domain-Driven Design (DDD)
+subtitle: Eventos y Servicios de Dominio - Aplicación Práctica
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "DDD - Eventos y Servicios de Dominio - ENYOI"
+---
+
+# Introducción a DDD
+
+**Domain-Driven Design** (Diseño Guiado por el Dominio) es un enfoque de desarrollo de software que prioriza el **dominio del negocio** como el centro de la arquitectura.
+
+Fue introducido por **Eric Evans** en su libro "Domain-Driven Design: Tackling Complexity in the Heart of Software" (2003).
+
+::: {.callout-tip}
+**Navegación**: Usa ↓ para profundizar en un tema, → para pasar al siguiente tema
+:::
+
+---
+
+## ¿Por qué DDD? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Problemas comunes:**
+
+- Código que no refleja el negocio
+- Comunicación difícil entre desarrolladores y expertos del dominio
+- Lógica de negocio dispersa
+- Software difícil de mantener y evolucionar
+:::
+
+::: {.column width="50%"}
+**DDD propone:**
+
+- El dominio es el corazón del software
+- Lenguaje común (Ubiquitous Language)
+- Modelos ricos en comportamiento
+- Separación clara de responsabilidades
+:::
+:::
+
+---
+
+## Caso de Estudio: Proyecto Arka {.smaller}
+
+**Arka** es una empresa colombiana de distribución de accesorios para PC que enfrenta:
+
+- Administración manual ineficiente del inventario
+- Incidentes de sobreventa por alta concurrencia
+- Falta de información estratégica y reportes
+
+**Objetivo**: Sistema backend robusto para automatizar procesos y permitir autogestión de clientes.
+
+---
+
+## Módulos del Sistema Arka {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Sistema Arka"
+        M1["Módulo 1<br/>Gestión de Inventario<br/>y Abastecimiento"]
+        M2["Módulo 2<br/>Gestión de Órdenes<br/>de Compra"]
+        M3["Módulo 3<br/>Reportes y Análisis<br/>de Ventas"]
+    end
+
+    M1 --> |Stock disponible| M2
+    M2 --> |Datos de ventas| M3
+    M3 --> |Alertas abastecimiento| M1
+```
+
+---
+
+## Pilares de DDD {.smaller}
+
+```{mermaid}
+mindmap
+  root((DDD))
+    Lenguaje Ubicuo
+      Términos del negocio
+      Comunicación clara
+      Documentación viva
+    Modelo de Dominio
+      Entidades
+      Value Objects
+      Agregados
+    Patrones Tácticos
+      Servicios de Dominio
+      Eventos de Dominio
+      Repositorios
+    Patrones Estratégicos
+      Bounded Contexts
+      Context Maps
+```
+
+
+
+# Lenguaje Ubicuo
+
+El **Lenguaje Ubicuo** (Ubiquitous Language) es un vocabulario común compartido entre desarrolladores y expertos del dominio.
+
+Es la base de DDD: si no hablamos el mismo idioma, no podemos construir el software correcto.
+
+---
+
+## Ejemplo: Vocabulario de Arka {.smaller}
+
+| Término del Negocio | Significado en el Sistema |
+|---------------------|---------------------------|
+| **Producto** | Accesorio para PC con stock, precio y atributos |
+| **Orden de Compra** | Pedido de un cliente con múltiples productos |
+| **Stock** | Cantidad disponible de un producto |
+| **Umbral de Stock** | Cantidad mínima antes de generar alerta |
+| **Carrito Abandonado** | Orden en estado pendiente sin actividad |
+| **Despacho** | Proceso de envío de una orden confirmada |
+
+---
+
+## Del Negocio al Código {.smaller}
+
+**Experto del dominio dice:**
+
+> "Cuando un cliente confirma una orden, debemos validar que haya stock suficiente de cada producto. Si hay stock, reservamos los productos y notificamos al cliente."
+
+**En código esto se traduce a:**
+
+```java
+public class OrdenDeCompra {
+
+    public void confirmar(ServicioDeStock servicioStock) {
+        validarStockDisponible(servicioStock);
+        reservarProductos(servicioStock);
+        cambiarEstadoAConfirmada();
+        // Se dispara evento: OrdenConfirmadaEvent
+    }
+}
+```
+
+---
+
+## Importancia del Lenguaje Ubicuo {.smaller}
+
+::: columns
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Sin Lenguaje Ubicuo"
+        A1[Experto: 'Pedido'] --> B1[Dev: 'Request']
+        A1 --> C1[QA: 'Order']
+        A1 --> D1[Confusión total]
+    end
+```
+:::
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Con Lenguaje Ubicuo"
+        A2[Experto: 'Orden de Compra'] --> B2[Dev: 'OrdenDeCompra']
+        B2 --> C2[QA: 'Orden de Compra']
+        C2 --> D2[Entendimiento común]
+    end
+```
+:::
+:::
+
+
+
+# Bounded Contexts
+
+Un **Bounded Context** (Contexto Delimitado) es una frontera explícita donde un modelo de dominio particular tiene significado.
+
+Dentro de cada contexto, los términos tienen un significado **preciso y consistente**.
+
+---
+
+## ¿Por qué Bounded Contexts? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**El problema:**
+
+Un mismo término puede significar cosas diferentes en distintas áreas del negocio.
+
+- "Cliente" en **Ventas** = persona que compra
+- "Cliente" en **Soporte** = ticket de ayuda
+- "Cliente" en **Facturación** = entidad fiscal
+:::
+
+::: {.column width="50%"}
+**La solución:**
+
+Cada área tiene su **propio modelo** con sus propias definiciones.
+
+No forzamos un modelo único para todo el sistema.
+:::
+:::
+
+---
+
+## Bounded Contexts en Arka {.smaller}
+
+```{mermaid}
+graph LR
+    subgraph BC1["Inventario"]
+        P1["Producto"]
+        PR1["Proveedor"]
+    end
+
+    subgraph BC2["Órdenes"]
+        O["OrdenDeCompra"]
+        P2["Producto"]
+    end
+
+    subgraph BC3["Reportes"]
+        V["Venta"]
+        P3["Producto"]
+    end
+
+    BC1 -.->|"StockActualizado"| BC2
+    BC2 -.->|"OrdenConfirmada"| BC3
+    BC2 -.->|"OrdenConfirmada"| BC1
+```
+
+::: {.callout-note}
+**Producto** existe en los 3 contextos pero con **atributos diferentes** en cada uno.
+:::
+
+---
+
+## Producto en Diferentes Contextos {.smaller}
+
+| Atributo              | Inventario | Órdenes | Reportes |
+|-----------------------|:----------:|:-------:|:--------:|
+| ID                    | Sí         | Sí      | Sí       |
+| Nombre                | Sí         | Sí      | Sí       |
+| Stock actual          | Sí         | No      | No       |
+| Umbral stock          | Sí         | No      | No       |
+| Ubicación bodega      | Sí         | No      | No       |
+| Precio venta          | No         | Sí      | No       |
+| Cantidad en orden     | No         | Sí      | No       |
+| Total vendido (mes)   | No         | No      | Sí       |
+| Categoría analytics   | No         | No      | Sí       |
+
+::: {.callout-tip}
+**Cada contexto** tiene su propia vista del "Producto" con solo los atributos que necesita.
+:::
+
+
+# Context Maps
+
+Un **Context Map** (Mapa de Contextos) documenta las relaciones entre los diferentes Bounded Contexts.
+
+Define cómo se comunican y qué tipo de relación tienen.
+
+---
+
+## Patrones de Relación entre Contextos {.smaller}
+
+| Patrón | Descripción | Ejemplo en Arka |
+|--------|-------------|-----------------|
+| **Shared Kernel** | Comparten parte del modelo | Entidades comunes (raro) |
+| **Customer-Supplier** | Uno provee, otro consume | Inventario → Órdenes |
+| **Conformist** | Uno se adapta al modelo del otro | Reportes se adapta a Órdenes |
+| **Anti-Corruption Layer** | Traduce entre modelos | Integración con sistema legacy |
+| **Published Language** | Lenguaje común documentado | API pública |
+
+---
+
+## Context Map de Arka {.smaller}
+
+::: {style="transform: scale(0.82); transform-origin: left top;"}
+```{mermaid}
+%%| fig-align: center
+graph LR
+    subgraph "Context Map"
+        INV["Inventario<br/>(Upstream)"]
+        ORD["Órdenes<br/>(Core)"]
+        REP["Reportes<br/>(Downstream)"]
+        EXT["Sistema Legacy<br/>(Externo)"]
+    end
+
+    INV -->|"Customer-Supplier<br/>Provee stock"| ORD
+    ORD -->|"Conformist<br/>Consume datos"| REP
+    EXT -->|"ACL<br/>Anti-Corruption Layer"| INV
+```
+:::
+
+---
+
+## Anti-Corruption Layer (ACL) {.smaller}
+
+Cuando integramos con sistemas externos o legacy, usamos una **capa de traducción** para proteger nuestro modelo.
+
+```{mermaid}
+graph LR
+    subgraph "Nuestro Sistema"
+        DOM["Dominio<br/>Modelo Limpio"]
+        ACL["Anti-Corruption Layer<br/>Adaptador/Traductor"]
+    end
+
+    subgraph "Sistema Externo"
+        LEG["Sistema Legacy<br/>Modelo Diferente"]
+    end
+
+    DOM <--> ACL
+    ACL <-->|"Traduce"| LEG
+```
+
+::: {.callout-note}
+El **ACL** evita que los conceptos del sistema externo "contaminen" nuestro modelo de dominio.
+:::
+
+---
+
+## Resumen: Bounded Contexts y Context Maps {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Bounded Context:**
+
+- Frontera donde el modelo tiene significado
+- Cada contexto = un microservicio (potencial)
+- Lenguaje ubicuo **local**
+- Autonomía de equipo
+:::
+
+::: {.column width="50%"}
+**Context Map:**
+
+- Documenta relaciones entre contextos
+- Define patrones de integración
+- Identifica dependencias
+- Guía decisiones arquitectónicas
+:::
+:::
+
+
+
+# Building Blocks de DDD
+
+Los **Building Blocks** son los bloques de construcción tácticos de DDD.
+
+Son los patrones que usamos para modelar el dominio.
+
+---
+
+## Vista General de Building Blocks {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Identidad Propia"
+        E[Entidades]
+    end
+
+    subgraph "Sin Identidad - Inmutables"
+        VO[Value Objects]
+    end
+
+    subgraph "Agrupan Entidades"
+        AG[Agregados]
+    end
+
+    subgraph "Operaciones del Dominio"
+        SD[Servicios de Dominio]
+    end
+
+    subgraph "Comunicación"
+        EV[Eventos de Dominio]
+    end
+
+    subgraph "Persistencia"
+        RP[Repositorios]
+    end
+
+    AG --> E
+    AG --> VO
+    SD --> AG
+    AG --> EV
+    RP --> AG
+```
+
+
+
+# Entidades
+
+Una **Entidad** es un objeto con identidad única que persiste a lo largo del tiempo.
+
+Dos entidades son iguales si tienen el mismo identificador, aunque sus atributos cambien.
+
+---
+
+## Características de Entidades {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Tienen:**
+
+- Identidad única (ID)
+- Ciclo de vida
+- Comportamiento (métodos)
+- Estado mutable
+:::
+
+::: {.column width="50%"}
+**Ejemplos en Arka:**
+
+- `Producto` (identificado por `productoId`)
+- `OrdenDeCompra` (identificado por `ordenId`)
+- `Cliente` (identificado por `clienteId`)
+:::
+:::
+
+---
+
+## Entidad: Producto en Arka {.smaller}
+
+```java
+package com.arka.dominio.inventario.entidades;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+
+public class Producto {
+    private final ProductoId id;
+    private String nombre;
+    private String descripcion;
+    private BigDecimal precio;
+    private int stockActual;
+    private int umbralStock;
+    private CategoriaId categoriaId;
+    private MarcaId marcaId;
+    private boolean activo;
+
+    public Producto(String nombre, String descripcion,
+                    BigDecimal precio, int stockInicial, int umbralStock,
+                    CategoriaId categoriaId, MarcaId marcaId) {
+        this.id = new ProductoId(UUID.randomUUID());
+        this.nombre = nombre;
+        this.descripcion = descripcion;
+        this.precio = precio;
+        this.stockActual = stockInicial;
+        this.umbralStock = umbralStock;
+        this.categoriaId = categoriaId;
+        this.marcaId = marcaId;
+        this.activo = true;
+    }
+
+    // Getters
+    public ProductoId getId() { return id; }
+    public String getNombre() { return nombre; }
+    public int getStockActual() { return stockActual; }
+}
+```
+
+---
+
+## Comportamiento en la Entidad {.smaller}
+
+```java
+// Continuación de Producto.java
+
+public void reducirStock(int cantidad) {
+    if (cantidad <= 0) {
+        throw new IllegalArgumentException("La cantidad debe ser positiva");
+    }
+    if (cantidad > this.stockActual) {
+        throw new StockInsuficienteException(
+            "Stock insuficiente para " + nombre +
+            ". Disponible: " + stockActual + ", Solicitado: " + cantidad
+        );
+    }
+    this.stockActual -= cantidad;
+}
+
+public void agregarStock(int cantidad) {
+    if (cantidad <= 0) {
+        throw new IllegalArgumentException("La cantidad debe ser positiva");
+    }
+    this.stockActual += cantidad;
+}
+
+public boolean requiereReabastecimiento() {
+    return this.stockActual <= this.umbralStock;
+}
+
+public void actualizarPrecio(BigDecimal nuevoPrecio) {
+    if (nuevoPrecio.compareTo(BigDecimal.ZERO) <= 0) {
+        throw new IllegalArgumentException("El precio debe ser mayor a cero");
+    }
+    this.precio = nuevoPrecio;
+}
+```
+
+---
+
+## Entidad y Agregado: OrdenDeCompra {#sec-orden-compra .smaller}
+
+::: {.callout-tip style="font-size: 0.6em !important;"}
+**¿Por qué es un Agregado?** Esta entidad es también un **Aggregate Root** porque agrupa y controla el acceso a las entidades `LineaOrden`. Veremos más sobre agregados en la [sección de Agregados](#sec-agregados).
+:::
+
+```{.java style="font-size: 0.67em !important;"}
+package com.arka.dominio.ordenes.entidades;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+public class OrdenDeCompra {
+    private final OrdenId id;
+    private final ClienteId clienteId;
+    private List<LineaOrden> lineas;
+    private EstadoOrden estado;
+    private LocalDateTime fechaCreacion;
+    private LocalDateTime fechaModificacion;
+
+    public OrdenDeCompra(ClienteId clienteId) {
+        this.id = new OrdenId(UUID.randomUUID());
+        this.clienteId = clienteId;
+        this.lineas = new ArrayList<>();
+        this.estado = EstadoOrden.PENDIENTE;
+        this.fechaCreacion = LocalDateTime.now();
+        this.fechaModificacion = LocalDateTime.now();
+    }
+
+    public OrdenId getId() { return id; }
+    public ClienteId getClienteId() { return clienteId; }
+    public EstadoOrden getEstado() { return estado; }
+    public List<LineaOrden> getLineas() {
+        return List.copyOf(lineas); // Retorna copia inmutable
+    }
+}
+```
+
+---
+
+## Reglas de Negocio en OrdenDeCompra {.smaller}
+
+```java
+// Continuación de OrdenDeCompra.java
+
+public void agregarProducto(ProductoId productoId, int cantidad, BigDecimal precioUnitario) {
+    validarModificable();
+
+    // Buscar si ya existe el producto en la orden
+    LineaOrden lineaExistente = buscarLinea(productoId);
+    if (lineaExistente != null) {
+        lineaExistente.aumentarCantidad(cantidad);
+    } else {
+        lineas.add(new LineaOrden(productoId, cantidad, precioUnitario));
+    }
+    this.fechaModificacion = LocalDateTime.now();
+}
+
+public void eliminarProducto(ProductoId productoId) {
+    validarModificable();
+    lineas.removeIf(linea -> linea.getProductoId().equals(productoId));
+    this.fechaModificacion = LocalDateTime.now();
+}
+
+private void validarModificable() {
+    if (this.estado != EstadoOrden.PENDIENTE) {
+        throw new OrdenNoModificableException(
+            "Solo se pueden modificar órdenes en estado PENDIENTE. " +
+            "Estado actual: " + this.estado
+        );
+    }
+}
+
+private LineaOrden buscarLinea(ProductoId productoId) {
+    return lineas.stream()
+        .filter(l -> l.getProductoId().equals(productoId))
+        .findFirst()
+        .orElse(null);
+}
+```
+
+
+
+# Value Objects
+
+Un **Value Object** (Objeto de Valor) es un objeto inmutable que se define por sus atributos, no por una identidad.
+
+Dos Value Objects son iguales si todos sus atributos son iguales.
+
+---
+
+## Características de Value Objects {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Tienen:**
+
+- Son inmutables
+- Sin identidad
+- Comparación por atributos
+- Auto-validación
+:::
+
+::: {.column width="50%"}
+**Ejemplos en Arka:**
+
+- `ProductoId`, `OrdenId`, `ClienteId`
+- `Dinero` (monto + moneda)
+- `Direccion` (para envíos)
+- `Email`, `Telefono`
+:::
+:::
+
+---
+
+## Value Object: ProductoId {.smaller}
+
+```java
+package com.arka.dominio.inventario.valores;
+
+import java.util.Objects;
+import java.util.UUID;
+
+public final class ProductoId {
+    private final UUID valor;
+
+    public ProductoId(UUID valor) {
+        if (valor == null) {
+            throw new IllegalArgumentException("El ID del producto no puede ser nulo");
+        }
+        this.valor = valor;
+    }
+
+    public static ProductoId fromString(String id) {
+        return new ProductoId(UUID.fromString(id));
+    }
+
+    public UUID getValor() { return valor; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ProductoId that = (ProductoId) o;
+        return Objects.equals(valor, that.valor);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(valor);
+    }
+
+    @Override
+    public String toString() {
+        return valor.toString();
+    }
+}
+```
+
+---
+
+## Value Object: Dinero {.smaller}
+
+```java
+package com.arka.dominio.compartido.valores;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Objects;
+
+public final class Dinero {
+    private final BigDecimal monto;
+    private final String moneda;
+
+    public Dinero(BigDecimal monto, String moneda) {
+        if (monto == null || monto.compareTo(BigDecimal.ZERO) < 0) {
+            throw new IllegalArgumentException("El monto no puede ser negativo");
+        }
+        if (moneda == null || moneda.isBlank()) {
+            throw new IllegalArgumentException("La moneda es requerida");
+        }
+        this.monto = monto.setScale(2, RoundingMode.HALF_UP);
+        this.moneda = moneda.toUpperCase();
+    }
+
+    public static Dinero pesos(BigDecimal monto) {
+        return new Dinero(monto, "COP");
+    }
+
+    public static Dinero dolares(BigDecimal monto) {
+        return new Dinero(monto, "USD");
+    }
+
+    public BigDecimal getMonto() { return monto; }
+    public String getMoneda() { return moneda; }
+}
+```
+
+---
+
+## Operaciones en Dinero {.smaller}
+
+```java
+// Continuación de Dinero.java
+
+public Dinero sumar(Dinero otro) {
+    validarMismaMoneda(otro);
+    return new Dinero(this.monto.add(otro.monto), this.moneda);
+}
+
+public Dinero restar(Dinero otro) {
+    validarMismaMoneda(otro);
+    BigDecimal resultado = this.monto.subtract(otro.monto);
+    if (resultado.compareTo(BigDecimal.ZERO) < 0) {
+        throw new IllegalArgumentException("El resultado no puede ser negativo");
+    }
+    return new Dinero(resultado, this.moneda);
+}
+
+public Dinero multiplicar(int cantidad) {
+    return new Dinero(this.monto.multiply(BigDecimal.valueOf(cantidad)), this.moneda);
+}
+
+private void validarMismaMoneda(Dinero otro) {
+    if (!this.moneda.equals(otro.moneda)) {
+        throw new IllegalArgumentException(
+            "No se pueden operar monedas diferentes: " +
+            this.moneda + " vs " + otro.moneda
+        );
+    }
+}
+
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Dinero dinero = (Dinero) o;
+    return monto.compareTo(dinero.monto) == 0 && moneda.equals(dinero.moneda);
+}
+```
+
+---
+
+## Value Object: Direccion {.smaller}
+
+```java
+package com.arka.dominio.compartido.valores;
+
+import java.util.Objects;
+
+public final class Direccion {
+    private final String calle;
+    private final String ciudad;
+    private final String departamento;
+    private final String pais;
+    private final String codigoPostal;
+
+    public Direccion(String calle, String ciudad, String departamento,
+                     String pais, String codigoPostal) {
+        if (calle == null || calle.isBlank()) {
+            throw new IllegalArgumentException("La calle es requerida");
+        }
+        if (ciudad == null || ciudad.isBlank()) {
+            throw new IllegalArgumentException("La ciudad es requerida");
+        }
+        this.calle = calle;
+        this.ciudad = ciudad;
+        this.departamento = departamento;
+        this.pais = pais != null ? pais : "Colombia";
+        this.codigoPostal = codigoPostal;
+    }
+
+    public String direccionCompleta() {
+        return String.format("%s, %s, %s, %s",
+            calle, ciudad, departamento, pais);
+    }
+
+    // Getters, equals, hashCode...
+}
+```
+
+---
+
+## Entidad vs Value Object {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Entidad"
+        E1["Producto #123"]
+        E2["Producto #123<br/>(precio actualizado)"]
+        E1 -->|"Mismo ID = Mismo objeto"| E2
+    end
+
+    subgraph "Value Object"
+        V1["Dinero(100, COP)"]
+        V2["Dinero(100, COP)"]
+        V3["Dinero(200, COP)"]
+        V1 -->|"Mismos valores = Iguales"| V2
+        V1 -->|"Diferentes valores = Diferentes"| V3
+    end
+```
+
+
+
+# Agregados {#sec-agregados}
+
+Un **Agregado** es un cluster de Entidades y Value Objects que se tratan como una unidad para propósitos de cambio de datos.
+
+El **Aggregate Root** (Raíz del Agregado) es la entidad principal que controla el acceso al agregado.
+
+---
+
+## Características de Agregados {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Reglas:**
+
+- Una raíz (Aggregate Root)
+- Límite de consistencia
+- Acceso solo por la raíz
+- Transacciones atómicas
+:::
+
+::: {.column width="50%"}
+**En Arka:**
+
+- `Producto` (raíz) + `AtributoProducto`
+- `OrdenDeCompra` (raíz) + `LineaOrden`
+- `Cliente` (raíz) + `DireccionEnvio`
+:::
+:::
+
+---
+
+## Diagrama de Agregados en Arka {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Agregado: OrdenDeCompra"
+        OC[OrdenDeCompra<br/>Aggregate Root]
+        LO1[LineaOrden 1]
+        LO2[LineaOrden 2]
+        LO3[LineaOrden 3]
+        OC --> LO1
+        OC --> LO2
+        OC --> LO3
+    end
+
+    subgraph "Agregado: Producto"
+        P[Producto<br/>Aggregate Root]
+        AP1[AtributoProducto]
+        AP2[AtributoProducto]
+        P --> AP1
+        P --> AP2
+    end
+
+    subgraph "Agregado: Cliente"
+        C[Cliente<br/>Aggregate Root]
+        D1[DireccionEnvio 1]
+        D2[DireccionEnvio 2]
+        C --> D1
+        C --> D2
+    end
+```
+
+---
+
+## OrdenDeCompra como Agregado {.smaller}
+
+Ya vimos la entidad [OrdenDeCompra](#sec-orden-compra) en la sección de Entidades.
+
+**¿Qué la convierte en un Agregado?**
+
+::: columns
+::: {.column width="50%"}
+**Estructura del Agregado:**
+
+- `OrdenDeCompra` → **Aggregate Root**
+- `LineaOrden` → **Entidad interna**
+- `OrdenId`, `ClienteId` → **Value Objects**
+:::
+
+::: {.column width="50%"}
+**Reglas que cumple:**
+
+- `getLineas()` retorna copia inmutable
+- `LineaOrden` solo se crea desde la raíz
+- Validaciones centralizadas en la raíz
+- Se persiste como una unidad
+:::
+:::
+
+::: {.callout-warning}
+**Importante**: Nunca expongas referencias mutables a las entidades internas. Esto rompería la encapsulación del agregado.
+:::
+
+---
+
+## LineaOrden: Entidad Interna del Agregado {.smaller}
+
+```java
+package com.arka.dominio.ordenes.entidades;
+
+import java.math.BigDecimal;
+
+public class LineaOrden {
+    private final ProductoId productoId;
+    private int cantidad;
+    private final BigDecimal precioUnitario;
+
+    public LineaOrden(ProductoId productoId, int cantidad, BigDecimal precioUnitario) {
+        if (productoId == null) {
+            throw new IllegalArgumentException("El productoId es requerido");
+        }
+        if (cantidad <= 0) {
+            throw new IllegalArgumentException("La cantidad debe ser mayor a cero");
+        }
+        if (precioUnitario.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("El precio debe ser mayor a cero");
+        }
+        this.productoId = productoId;
+        this.cantidad = cantidad;
+        this.precioUnitario = precioUnitario;
+    }
+
+    public void aumentarCantidad(int cantidadAdicional) {
+        if (cantidadAdicional <= 0) {
+            throw new IllegalArgumentException("La cantidad adicional debe ser positiva");
+        }
+        this.cantidad += cantidadAdicional;
+    }
+
+    public BigDecimal calcularSubtotal() {
+        return precioUnitario.multiply(BigDecimal.valueOf(cantidad));
+    }
+
+    // Getters
+    public ProductoId getProductoId() { return productoId; }
+    public int getCantidad() { return cantidad; }
+    public BigDecimal getPrecioUnitario() { return precioUnitario; }
+}
+```
+
+---
+
+## Reglas de Agregados {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Correcto"
+        EXT1[Código Externo] --> AR1[Aggregate Root]
+        AR1 --> INT1[Entidades Internas]
+    end
+
+    subgraph "Incorrecto"
+        EXT2[Código Externo] -.->|"Acceso directo<br/>PROHIBIDO"| INT2[Entidades Internas]
+    end
+```
+
+::: {.callout-warning}
+**Nunca** accedas directamente a las entidades internas de un agregado. Siempre usa la raíz.
+:::
+
+
+
+# Servicios de Dominio
+
+Un **Servicio de Dominio** es una operación que no pertenece naturalmente a ninguna Entidad o Value Object.
+
+Representa una operación del dominio que involucra múltiples entidades o requiere coordinación.
+
+---
+
+## ¿Cuándo usar Servicios de Dominio? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Usar cuando:**
+
+- La operación involucra múltiples agregados
+- Es una lógica de negocio que no pertenece a una entidad
+- Requiere cálculos complejos
+- Coordina acciones entre entidades
+:::
+
+::: {.column width="50%"}
+**NO usar cuando:**
+
+- ❌ La lógica pertenece a una entidad
+- ❌ Es infraestructura (email, BD)
+- ❌ Es solo CRUD
+- ❌ Es orquestación de aplicación
+:::
+:::
+
+---
+
+## Servicio de Dominio vs Otros Servicios {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Servicios de Dominio"
+        SD["ServicioValidacionStock<br/>ServicioCalculoPrecio<br/>ServicioReservaProductos"]
+    end
+
+    subgraph "Servicios de Aplicación"
+        SA["ConfirmarOrdenUseCase<br/>CrearProductoUseCase<br/>GenerarReporteUseCase"]
+    end
+
+    subgraph "Servicios de Infraestructura"
+        SI["EmailService<br/>ProductoRepositoryImpl<br/>PasarelaPagoAdapter"]
+    end
+
+    SA --> SD
+    SA --> SI
+    SD --> |"Usa entidades"| E[Entidades del Dominio]
+```
+
+---
+
+## Servicio de Dominio: ValidacionStockService {.smaller}
+
+```java
+package com.arka.dominio.ordenes.servicios;
+
+import com.arka.dominio.inventario.entidades.Producto;
+import com.arka.dominio.ordenes.entidades.LineaOrden;
+import com.arka.dominio.ordenes.entidades.OrdenDeCompra;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Servicio de Dominio: Valida que haya stock suficiente para una orden.
+ *
+ * ¿Por qué es un Servicio de Dominio?
+ * - Involucra dos agregados: OrdenDeCompra y Producto
+ * - Contiene regla de negocio: "No se puede confirmar sin stock"
+ * - No pertenece naturalmente a ninguna de las entidades
+ */
+public class ValidacionStockService {
+
+    public ResultadoValidacion validarDisponibilidad(
+            OrdenDeCompra orden,
+            Map<ProductoId, Producto> productosDisponibles) {
+
+        List<String> errores = new ArrayList<>();
+
+        for (LineaOrden linea : orden.getLineas()) {
+            Producto producto = productosDisponibles.get(linea.getProductoId());
+
+            if (producto == null) {
+                errores.add("Producto no encontrado: " + linea.getProductoId());
+                continue;
+            }
+
+            if (producto.getStockActual() < linea.getCantidad()) {
+                errores.add(String.format(
+                    "Stock insuficiente para '%s'. Disponible: %d, Solicitado: %d",
+                    producto.getNombre(),
+                    producto.getStockActual(),
+                    linea.getCantidad()
+                ));
+            }
+        }
+
+        return new ResultadoValidacion(errores.isEmpty(), errores);
+    }
+}
+```
+
+---
+
+## Servicio de Dominio: CalculoPrecioService {.smaller}
+
+```java
+package com.arka.dominio.ordenes.servicios;
+
+import com.arka.dominio.compartido.valores.Dinero;
+import com.arka.dominio.ordenes.entidades.OrdenDeCompra;
+import com.arka.dominio.ordenes.entidades.LineaOrden;
+import java.math.BigDecimal;
+
+/**
+ * Servicio de Dominio: Calcula el precio total de una orden
+ * aplicando reglas de negocio como descuentos por volumen.
+ */
+public class CalculoPrecioService {
+
+    private static final int UMBRAL_DESCUENTO_VOLUMEN = 10;
+    private static final BigDecimal PORCENTAJE_DESCUENTO = new BigDecimal("0.05"); // 5%
+
+    public Dinero calcularTotal(OrdenDeCompra orden) {
+        BigDecimal subtotal = BigDecimal.ZERO;
+        int totalProductos = 0;
+
+        for (LineaOrden linea : orden.getLineas()) {
+            subtotal = subtotal.add(linea.calcularSubtotal());
+            totalProductos += linea.getCantidad();
+        }
+
+        // Regla de negocio: 5% descuento por compras de más de 10 unidades
+        if (totalProductos >= UMBRAL_DESCUENTO_VOLUMEN) {
+            BigDecimal descuento = subtotal.multiply(PORCENTAJE_DESCUENTO);
+            subtotal = subtotal.subtract(descuento);
+        }
+
+        return Dinero.pesos(subtotal);
+    }
+
+    public boolean aplicaDescuentoVolumen(OrdenDeCompra orden) {
+        int total = orden.getLineas().stream()
+            .mapToInt(LineaOrden::getCantidad)
+            .sum();
+        return total >= UMBRAL_DESCUENTO_VOLUMEN;
+    }
+}
+```
+
+---
+
+## Servicio de Dominio: ReservaProductosService {.smaller}
+
+```java
+package com.arka.dominio.ordenes.servicios;
+
+import com.arka.dominio.inventario.entidades.Producto;
+import com.arka.dominio.ordenes.entidades.LineaOrden;
+import com.arka.dominio.ordenes.entidades.OrdenDeCompra;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Servicio de Dominio: Reserva productos del inventario para una orden.
+ *
+ * Esta operación modifica múltiples agregados (Productos) basándose
+ * en el contenido de otro agregado (OrdenDeCompra).
+ */
+public class ReservaProductosService {
+
+    private final ValidacionStockService validacionStock;
+
+    public ReservaProductosService(ValidacionStockService validacionStock) {
+        this.validacionStock = validacionStock;
+    }
+
+    public List<Producto> reservar(
+            OrdenDeCompra orden,
+            Map<ProductoId, Producto> productos) {
+
+        // Primero validamos
+        ResultadoValidacion validacion = validacionStock.validarDisponibilidad(orden, productos);
+        if (!validacion.esValido()) {
+            throw new StockInsuficienteException(validacion.getMensajeError());
+        }
+
+        // Luego reservamos (reducimos stock)
+        List<Producto> productosModificados = new ArrayList<>();
+
+        for (LineaOrden linea : orden.getLineas()) {
+            Producto producto = productos.get(linea.getProductoId());
+            producto.reducirStock(linea.getCantidad());
+            productosModificados.add(producto);
+        }
+
+        return productosModificados;
+    }
+}
+```
+
+---
+
+## Características de Servicios de Dominio {.smaller}
+
+```{mermaid}
+mindmap
+  root((Servicio de Dominio))
+    Stateless
+      Sin estado interno
+      No guarda datos entre llamadas
+    Dominio Puro
+      Solo lógica de negocio
+      Sin dependencias de infraestructura
+    Lenguaje Ubicuo
+      Nombres que el negocio entiende
+      ValidacionStock, CalculoPrecio
+    Coordinación
+      Trabaja con múltiples agregados
+      Orquesta operaciones del dominio
+```
+
+
+
+# Eventos de Dominio
+
+Un **Evento de Dominio** representa algo que ocurrió en el dominio que es relevante para el negocio.
+
+Los eventos permiten desacoplar partes del sistema y reaccionar a cambios de forma asíncrona.
+
+---
+
+## ¿Por qué Eventos de Dominio? {.smaller}
+
+
+::: columns
+::: {.column width="60%"}
+```{mermaid}
+graph LR
+    subgraph "Sin Eventos - Acoplamiento"
+        O1[OrdenService] --> N1[NotificacionService]
+        O1 --> I1[InventarioService]
+        O1 --> R1[ReporteService]
+        O1 --> A1[AlertaService]
+    end
+```
+:::
+::: {.column width="60%"}
+```{mermaid}
+graph LR
+    subgraph "Con Eventos - Desacoplamiento"
+        O2[OrdenService] --> E2((OrdenConfirmadaEvent))
+        E2 --> N2[NotificacionListener]
+        E2 --> I2[InventarioListener]
+        E2 --> R2[ReporteListener]
+        E2 --> A2[AlertaListener]
+    end
+```
+:::
+:::
+
+---
+
+
+## Beneficios de Eventos de Dominio {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Desacoplamiento:**
+
+- Componentes independientes
+- Fácil agregar nuevos listeners
+- Cada módulo evoluciona solo
+:::
+
+::: {.column width="50%"}
+**Trazabilidad:**
+
+- Historial de lo que pasó
+- Auditoría natural
+- Debug más fácil
+:::
+:::
+
+::: columns
+::: {.column width="50%"}
+**Escalabilidad:**
+
+- Procesamiento asíncrono
+- Distribución de carga
+:::
+
+::: {.column width="50%"}
+**Eventual Consistency:**
+
+- Consistencia eventual entre módulos
+- Mayor disponibilidad
+:::
+:::
+
+
+
+## Modelos de Consistencia {.smaller}
+
+Cuando usamos eventos, debemos entender cómo se sincronizan los datos en el sistema.
+
+```{mermaid}
+graph LR
+    subgraph " "
+        SC[Consistencia Fuerte<br/>Strong Consistency]
+        EC[Consistencia Eventual<br/>Eventual Consistency]
+    end
+
+    SC ---|"Transaccional<br/>Todo o Nada"| T1[Síncrono]
+    EC ---|"Eventos<br/>Progresivo"| T2[Asíncrono]
+```
+
+::: {.callout-note}
+La elección depende del **caso de uso** y los **requisitos del negocio**.
+:::
+
+---
+
+## Consistencia Fuerte (Strong Consistency) {.smaller}
+
+Todo ocurre en **una sola transacción**. Si algo falla, **todo se revierte**.
+
+```{mermaid}
+graph LR
+    A[Confirmar<br/>Orden] --> B[Reducir<br/>Stock]
+    B --> C[Enviar<br/>Email]
+    C --> D[Actualizar<br/>Reporte]
+    D --> E{¿Todo OK?}
+    E -->|Sí| F[COMMIT]
+    E -->|No| G[ROLLBACK<br/>Todo se revierte]
+```
+
+::: {.callout-warning}
+**Problema**: Si el servidor de email está caído, ¡no puedo confirmar ninguna orden!
+:::
+
+---
+
+## Consistencia Fuerte - Características {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Ventajas**
+
+- Datos siempre consistentes
+- Fácil de razonar
+- Sin estados intermedios
+:::
+
+::: {.column width="50%"}
+**Desventajas**
+
+- Más lento
+- Menor disponibilidad
+- Un fallo afecta todo
+:::
+:::
+
+**Usar cuando:** Transferencias bancarias, pagos, operaciones que **no pueden fallar parcialmente**.
+
+---
+
+## Consistencia Eventual (Eventual Consistency) {.smaller}
+
+La operación principal se completa **inmediatamente**. Los efectos secundarios ocurren **después** via eventos.
+
+```{mermaid}
+graph LR
+    subgraph "Transacción Principal"
+        A[Confirmar<br/>Orden] --> B[Guardar<br/>en BD]
+        B --> C[Publicar<br/>Evento]
+    end
+
+    C -.->|async| D[Reducir Stock]
+    C -.->|async| E[Enviar Email]
+    C -.->|async| F[Actualizar Reporte]
+```
+
+---
+
+## Consistencia Eventual - Línea de Tiempo {.smaller}
+
+```{mermaid}
+gantt
+    title Línea de Tiempo - Consistencia Eventual
+    dateFormat ss
+    axisFormat %Sms
+    tickInterval 1second
+
+    section Transacción
+    Confirmar orden          :active, t1, 00, 1s
+    Guardar en BD            :active, t2, after t1, 1s
+    Publicar evento          :active, t3, after t2, 1s
+
+    section Async (paralelo)
+    Reducir stock     :active, s1, after t3, 2s
+    Actualizar reporte :active, s2, after t3, 3s
+    Enviar email      :active, s3, after t3, 8s
+```
+
+
+Durante ese tiempo el sistema está **"eventualmente"** llegando a consistencia total.
+
+::: {.callout-tip}
+Si el email falla, **la orden ya está confirmada**. El email puede reintentarse después.
+:::
+
+---
+
+## Consistencia Eventual - Características {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Ventajas**
+
+- Más rápido (respuesta inmediata)
+- Mayor disponibilidad
+- Fallos aislados
+- Escala mejor
+:::
+
+::: {.column width="50%"}
+**Desventajas**
+
+- Estados intermedios existen
+- Más complejo de debuggear
+- Requiere **idempotencia**
+:::
+:::
+
+**Usar cuando:** Notificaciones, reportes, actualizaciones secundarias que **pueden reintentar**.
+
+---
+
+## ¿Qué es Idempotencia? {.smaller}
+
+Una operación es **idempotente** si ejecutarla múltiples veces produce el **mismo resultado** que ejecutarla una vez.
+
+::: columns
+::: {.column width="50%"}
+::: { style="transform: scale(0.88); transform-origin: top left;" }
+```{mermaid}
+%% | fig-align: center
+graph LR
+    subgraph "NO Idempotente"
+        A1[Sumar $100] --> B1[Saldo: $200]
+        B1 --> C1[Sumar $100]
+        C1 --> D1[Saldo: $300]
+    end
+```
+:::
+:::
+::: {.column width="50%" }
+::: { style="transform: scale(0.84); transform-origin: top left;" }
+```{mermaid}
+%% | fig-align: center
+graph LR
+    subgraph "Idempotente"
+        A2[Establecer saldo<br/>a $200] --> B2[Saldo: $200]
+        B2 --> C2[Establecer saldo<br/>a $200]
+        C2 --> D2[Saldo: $200]
+    end
+```
+:::
+:::
+:::
+
+---
+
+## Idempotencia en Eventos {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**¿Por qué es importante?**
+
+- Los eventos pueden llegar **duplicados**
+- Los listeners pueden **reintentar**
+- La red puede fallar y reenviar
+:::
+
+::: {.column width="50%"}
+**Técnicas comunes**
+
+- Guardar ID del evento procesado
+- Verificar si ya se ejecutó la acción
+:::
+:::
+
+::: {.callout-note}
+**Ejemplo**: Antes de enviar email, verificar: "¿Ya envié email para este evento ID?"
+:::
+
+---
+
+## Comparativa: ¿Cuándo Usar Cada Una? {.smaller}
+
+| Escenario | Fuerte | Eventual |
+|-----------|:------:|:--------:|
+| Transferencia bancaria | Sí | No |
+| Pago con tarjeta | Sí | No |
+| Reservar stock | Sí | Depende |
+| Enviar email de confirmación | No | Sí |
+| Actualizar reportes/analytics | No | Sí |
+| Notificar a otros sistemas | No | Sí |
+
+::: {.callout-note}
+**Reservar stock**: Depende del negocio. Si es crítico evitar sobreventa (ej: aerolíneas, conciertos), usa consistencia **fuerte**. Si puedes manejar compensaciones (ej: e-commerce con restock frecuente), puede ser **eventual** con verificación posterior.
+:::
+
+## Resumen: Consistencia en DDD {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Dentro del Agregado"
+        A[Consistencia<br/>FUERTE]
+        A --> A1[Invariantes siempre válidas]
+        A --> A2[Transacción única]
+    end
+
+    subgraph "Entre Agregados/Módulos"
+        B[Consistencia<br/>EVENTUAL]
+        B --> B1[Eventos de dominio]
+        B --> B2[Listeners independientes]
+    end
+
+    A ---|"Límite del<br/>Agregado"| B
+```
+
+::: {.callout-tip}
+**Regla práctica**: Consistencia fuerte **dentro** del agregado, consistencia eventual **entre** agregados.
+:::
+
+---
+
+## Eventos en Arka {.smaller}
+
+::: { style="transform: scale(1.2)"}
+```{mermaid}
+graph LR
+    subgraph "Servicios"
+        OS[OrdenService]
+        IS[InventarioService]
+        DET[DetectorCarritoAbandonado]
+    end
+
+    subgraph "Eventos"
+        OC((OrdenConfirmadaEvent))
+        SB((StockBajoEvent))
+        CA((CarritoAbandonadoEvent))
+    end
+
+    subgraph "Listeners"
+        NL[NotificacionListener]
+        IL[InventarioListener]
+        RL[ReporteListener]
+        AL[AlertaListener]
+        CL[ComprasListener]
+        EL[EmailCarritoListener]
+    end
+
+    OS -- "confirma orden" --> OC
+    OC -- "notifica" --> NL
+    OC -- "actualiza inventario" --> IL
+    OC -- "registra venta" --> RL
+
+    IL -- "detecta stock bajo" --> SB
+    SB -- "alerta" --> AL
+    SB -- "notifica compras" --> CL
+    SB -- "reporte semanal" --> RL
+
+    DET -- "detecta abandono" --> CA
+    CA -- "envía recordatorio" --> EL
+```
+:::
+
+## Evento: OrdenConfirmadaEvent {.smaller}
+
+```java
+package com.arka.dominio.ordenes.eventos;
+
+import com.arka.dominio.compartido.eventos.EventoDominioBase;
+import com.arka.dominio.compartido.valores.Dinero;
+import com.arka.dominio.ordenes.valores.ClienteId;
+import com.arka.dominio.ordenes.valores.OrdenId;
+
+import java.util.List;
+
+/**
+ * Evento disparado cuando una orden es confirmada.
+ *
+ * Este evento es importante porque:
+ * - El módulo de inventario debe reservar los productos
+ * - El módulo de notificaciones debe informar al cliente
+ * - El módulo de reportes debe registrar la venta
+ */
+public class OrdenConfirmadaEvent extends EventoDominioBase {
+
+    private final OrdenId ordenId;
+    private final ClienteId clienteId;
+    private final List<ProductoConfirmado> productos;
+    private final Dinero total;
+
+    public OrdenConfirmadaEvent(OrdenId ordenId, ClienteId clienteId,
+                                 List<ProductoConfirmado> productos, Dinero total) {
+        super();
+        this.ordenId = ordenId;
+        this.clienteId = clienteId;
+        this.productos = List.copyOf(productos);
+        this.total = total;
+    }
+
+    public OrdenId getOrdenId() { return ordenId; }
+    public ClienteId getClienteId() { return clienteId; }
+    public List<ProductoConfirmado> getProductos() { return productos; }
+    public Dinero getTotal() { return total; }
+}
+```
+
+---
+
+## Clase auxiliar ProductoConfirmado {.smaller}
+
+```java
+package com.arka.dominio.ordenes.eventos;
+
+import com.arka.dominio.inventario.valores.ProductoId;
+import java.math.BigDecimal;
+
+/**
+ * Información de un producto confirmado en una orden.
+ * Usado en eventos para transportar datos relevantes.
+ */
+public record ProductoConfirmado(
+    ProductoId productoId,
+    String nombreProducto,
+    int cantidad,
+    BigDecimal precioUnitario
+) {
+    public BigDecimal subtotal() {
+        return precioUnitario.multiply(BigDecimal.valueOf(cantidad));
+    }
+}
+```
+
+---
+
+## Evento: StockBajoEvent {.smaller}
+
+```java
+package com.arka.dominio.inventario.eventos;
+
+import com.arka.dominio.compartido.eventos.EventoDominioBase;
+import com.arka.dominio.inventario.valores.ProductoId;
+
+/**
+ * Evento disparado cuando el stock de un producto cae bajo el umbral.
+ *
+ * Este evento permite:
+ * - Generar alertas de reabastecimiento
+ * - Notificar al equipo de compras
+ * - Incluir el producto en el reporte semanal
+ */
+public class StockBajoEvent extends EventoDominioBase {
+
+    private final ProductoId productoId;
+    private final String nombreProducto;
+    private final int stockActual;
+    private final int umbral;
+
+    public StockBajoEvent(ProductoId productoId, String nombreProducto,
+                          int stockActual, int umbral) {
+        super();
+        this.productoId = productoId;
+        this.nombreProducto = nombreProducto;
+        this.stockActual = stockActual;
+        this.umbral = umbral;
+    }
+
+    public ProductoId getProductoId() { return productoId; }
+    public String getNombreProducto() { return nombreProducto; }
+    public int getStockActual() { return stockActual; }
+    public int getUmbral() { return umbral; }
+
+    public int unidadesFaltantes() {
+        return umbral - stockActual;
+    }
+}
+```
+
+---
+
+## Evento: CarritoAbandonadoEvent {.smaller}
+
+```java
+package com.arka.dominio.ordenes.eventos;
+
+import com.arka.dominio.compartido.eventos.EventoDominioBase;
+import com.arka.dominio.ordenes.valores.ClienteId;
+import com.arka.dominio.ordenes.valores.OrdenId;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+
+/**
+ * Evento disparado cuando se detecta un carrito abandonado.
+ *
+ * Permite enviar recordatorios automáticos por email
+ * para incentivar el cierre de la compra.
+ */
+public class CarritoAbandonadoEvent extends EventoDominioBase {
+
+    private final OrdenId ordenId;
+    private final ClienteId clienteId;
+    private final String emailCliente;
+    private final LocalDateTime ultimaModificacion;
+    private final int cantidadProductos;
+
+    public CarritoAbandonadoEvent(OrdenId ordenId, ClienteId clienteId,
+                                   String emailCliente, LocalDateTime ultimaModificacion,
+                                   int cantidadProductos) {
+        super();
+        this.ordenId = ordenId;
+        this.clienteId = clienteId;
+        this.emailCliente = emailCliente;
+        this.ultimaModificacion = ultimaModificacion;
+        this.cantidadProductos = cantidadProductos;
+    }
+
+    public Duration tiempoAbandonado() {
+        return Duration.between(ultimaModificacion, LocalDateTime.now());
+    }
+
+    // Getters...
+    public OrdenId getOrdenId() { return ordenId; }
+    public ClienteId getClienteId() { return clienteId; }
+    public String getEmailCliente() { return emailCliente; }
+    public int getCantidadProductos() { return cantidadProductos; }
+}
+```
+
+
+# Publicación de Eventos
+
+Para que los eventos sean útiles, necesitamos un mecanismo para publicarlos y que los listeners los reciban.
+
+---
+
+## Patrón: Publicador de Eventos {.smaller}
+
+::: { style="transform: scale(0.87); transform-origin: top center;" }
+```{mermaid}
+sequenceDiagram
+    participant E as Entidad/Servicio
+    participant P as PublicadorEventos
+    participant L1 as NotificacionListener
+    participant L2 as InventarioListener
+    participant L3 as ReporteListener
+
+    E->>E: confirmarOrden()
+    E->>P: publicar(OrdenConfirmadaEvent)
+    P->>L1: onOrdenConfirmada(event)
+    P->>L2: onOrdenConfirmada(event)
+    P->>L3: onOrdenConfirmada(event)
+    L1->>L1: enviarEmailConfirmacion()
+    L2->>L2: actualizarInventario()
+    L3->>L3: registrarVenta()
+```
+:::
+
+---
+
+## Entidad que Genera Eventos {.smaller}
+
+```java
+package com.arka.dominio.ordenes.entidades;
+
+import com.arka.dominio.compartido.eventos.EventoDominio;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class OrdenDeCompra {
+    // ... campos anteriores ...
+
+    private final List<EventoDominio> eventosGenerados = new ArrayList<>();
+
+    public void confirmar(ValidacionStockService validacionStock,
+                          CalculoPrecioService calculoPrecio,
+                          Map<ProductoId, Producto> productos) {
+
+        validarModificable();
+
+        // Validar stock disponible
+        ResultadoValidacion resultado = validacionStock.validarDisponibilidad(this, productos);
+        if (!resultado.esValido()) {
+            throw new StockInsuficienteException(resultado.getMensajeError());
+        }
+
+        // Cambiar estado
+        this.estado = EstadoOrden.CONFIRMADA;
+        this.fechaModificacion = LocalDateTime.now();
+
+        // Generar evento
+        Dinero total = calculoPrecio.calcularTotal(this);
+        eventosGenerados.add(new OrdenConfirmadaEvent(
+            this.id,
+            this.clienteId,
+            convertirAProductosConfirmados(productos),
+            total
+        ));
+    }
+
+    public List<EventoDominio> obtenerEventos() {
+        return Collections.unmodifiableList(eventosGenerados);
+    }
+
+    public void limpiarEventos() {
+        eventosGenerados.clear();
+    }
+}
+```
+
+---
+
+## Implementación Simple del Publicador {.smaller}
+
+```java
+package com.arka.infraestructura.eventos;
+
+import com.arka.dominio.compartido.eventos.EventoDominio;
+import com.arka.dominio.compartido.eventos.PublicadorEventos;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+
+/**
+ * Implementación simple en memoria del publicador de eventos.
+ * Útil para desarrollo y testing.
+ */
+public class PublicadorEventosEnMemoria implements PublicadorEventos {
+
+    private final Map<Class<?>, List<Consumer<EventoDominio>>> listeners =
+        new ConcurrentHashMap<>();
+
+    public <T extends EventoDominio> void registrar(
+            Class<T> tipoEvento,
+            Consumer<T> listener) {
+
+        listeners.computeIfAbsent(tipoEvento, k -> new ArrayList<>())
+                 .add(evento -> listener.accept((T) evento));
+    }
+
+    @Override
+    public void publicar(EventoDominio evento) {
+        System.out.println("Evento publicado: " + evento.getNombreEvento());
+
+        List<Consumer<EventoDominio>> eventListeners =
+            listeners.get(evento.getClass());
+
+        if (eventListeners != null) {
+            eventListeners.forEach(listener -> listener.accept(evento));
+        }
+    }
+}
+```
+
+---
+
+## Implementación con Spring Events (Preview) {.smaller}
+
+```java
+package com.arka.infraestructura.eventos;
+
+import com.arka.dominio.compartido.eventos.EventoDominio;
+import com.arka.dominio.compartido.eventos.PublicadorEventos;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Component;
+
+/**
+ * Implementación usando Spring ApplicationEventPublisher.
+ *
+ * Nota: Veremos Spring Boot en detalle más adelante.
+ * Por ahora, es importante entender el concepto.
+ */
+@Component
+public class PublicadorEventosSpring implements PublicadorEventos {
+
+    private final ApplicationEventPublisher publisher;
+
+    public PublicadorEventosSpring(ApplicationEventPublisher publisher) {
+        this.publisher = publisher;
+    }
+
+    @Override
+    public void publicar(EventoDominio evento) {
+        publisher.publishEvent(evento);
+    }
+}
+```
+
+---
+
+## Listener de Ejemplo (Preview Spring) {.smaller}
+
+```java
+package com.arka.infraestructura.eventos.listeners;
+
+import com.arka.dominio.ordenes.eventos.OrdenConfirmadaEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+
+/**
+ * Listener que reacciona a órdenes confirmadas.
+ * Envía notificación al cliente.
+ */
+@Component
+public class NotificacionOrdenListener {
+
+    private final ServicioEmail servicioEmail;
+
+    public NotificacionOrdenListener(ServicioEmail servicioEmail) {
+        this.servicioEmail = servicioEmail;
+    }
+
+    @EventListener
+    public void onOrdenConfirmada(OrdenConfirmadaEvent evento) {
+        System.out.println("📧 Enviando confirmación para orden: " + evento.getOrdenId());
+
+        servicioEmail.enviar(
+            evento.getClienteId(),
+            "Tu orden ha sido confirmada",
+            construirMensaje(evento)
+        );
+    }
+
+    private String construirMensaje(OrdenConfirmadaEvent evento) {
+        return String.format(
+            "Tu orden %s ha sido confirmada. Total: %s",
+            evento.getOrdenId(),
+            evento.getTotal()
+        );
+    }
+}
+```
+
+
+
+# Integrando Todo: Use Case
+
+Un **Use Case** (Caso de Uso) es un servicio de aplicación que orquesta la ejecución de una operación de negocio.
+
+Coordina entidades, servicios de dominio, eventos y **servicios de infraestructura** (repositorios, email, etc.) a través de puertos/interfaces.
+
+---
+
+## Use Case: Confirmar Orden {.smaller}
+
+::: {style="transform: scale(1.2); transform-origin: top center;"}
+```{mermaid}
+%%| fig-align: center
+sequenceDiagram
+    participant C as Cliente
+    participant UC as ConfirmarOrdenUseCase
+    participant OR as OrdenRepository
+    participant PR as ProductoRepository
+    participant VS as ValidacionStockService
+    participant RS as ReservaService
+    participant PE as PublicadorEventos
+
+    C->>UC: confirmar(ordenId)
+    UC->>OR: buscar(ordenId)
+    UC->>PR: buscarProductos(productoIds)
+    UC->>VS: validarDisponibilidad()
+    UC->>RS: reservar()
+    UC->>OR: guardar(orden)
+    UC->>PR: guardarTodos(productos)
+    UC->>PE: publicarTodos(eventos)
+    UC->>C: OrdenConfirmadaDTO
+```
+:::
+
+---
+
+## ConfirmarOrdenUseCase {.smaller}
+
+```java
+package com.arka.aplicacion.ordenes;
+
+import com.arka.dominio.compartido.eventos.PublicadorEventos;
+import com.arka.dominio.inventario.entidades.Producto;
+import com.arka.dominio.inventario.puertos.ProductoRepository;
+import com.arka.dominio.inventario.valores.ProductoId;
+import com.arka.dominio.ordenes.entidades.OrdenDeCompra;
+import com.arka.dominio.ordenes.entidades.LineaOrden;
+import com.arka.dominio.ordenes.puertos.OrdenRepository;
+import com.arka.dominio.ordenes.servicios.CalculoPrecioService;
+import com.arka.dominio.ordenes.servicios.ReservaProductosService;
+import com.arka.dominio.ordenes.servicios.ValidacionStockService;
+import com.arka.dominio.ordenes.valores.OrdenId;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * Caso de Uso: Confirmar una orden de compra.
+ *
+ * Responsabilidades:
+ * 1. Obtener la orden y los productos necesarios
+ * 2. Coordinar la validación y reserva de stock
+ * 3. Persistir los cambios
+ * 4. Publicar los eventos generados
+ */
+public class ConfirmarOrdenUseCase {
+
+    private final OrdenRepository ordenRepository;
+    private final ProductoRepository productoRepository;
+    private final ValidacionStockService validacionStock;
+    private final ReservaProductosService reservaService;
+    private final CalculoPrecioService calculoPrecio;
+    private final PublicadorEventos publicadorEventos;
+
+    // Constructor con inyección de dependencias
+    public ConfirmarOrdenUseCase(
+            OrdenRepository ordenRepository,
+            ProductoRepository productoRepository,
+            ValidacionStockService validacionStock,
+            ReservaProductosService reservaService,
+            CalculoPrecioService calculoPrecio,
+            PublicadorEventos publicadorEventos) {
+        this.ordenRepository = ordenRepository;
+        this.productoRepository = productoRepository;
+        this.validacionStock = validacionStock;
+        this.reservaService = reservaService;
+        this.calculoPrecio = calculoPrecio;
+        this.publicadorEventos = publicadorEventos;
+    }
+
+
+    public OrdenConfirmadaDTO ejecutar(OrdenId ordenId) {
+        // 1. Obtener la orden
+        OrdenDeCompra orden = ordenRepository.buscarPorId(ordenId)
+            .orElseThrow(() -> new OrdenNoEncontradaException(ordenId));
+
+        // 2. Obtener los productos de la orden
+        List<ProductoId> productoIds = orden.getLineas().stream()
+            .map(LineaOrden::getProductoId)
+            .collect(Collectors.toList());
+
+        Map<ProductoId, Producto> productos = productoRepository
+            .buscarPorIds(productoIds)
+            .stream()
+            .collect(Collectors.toMap(Producto::getId, p -> p));
+
+        // 3. Confirmar la orden (incluye validación)
+        orden.confirmar(validacionStock, calculoPrecio, productos);
+
+        // 4. Reservar stock (reduce inventario)
+        List<Producto> productosModificados = reservaService.reservar(orden, productos);
+
+        // 5. Persistir cambios
+        ordenRepository.guardar(orden);
+        productoRepository.guardarTodos(productosModificados);
+
+        // 6. Publicar eventos
+        publicadorEventos.publicarTodos(orden.obtenerEventos());
+        orden.limpiarEventos();
+
+        // 7. Verificar productos con stock bajo y publicar eventos
+        verificarStockBajo(productosModificados);
+
+        // 8. Retornar resultado
+        return OrdenConfirmadaDTO.from(orden, calculoPrecio.calcularTotal(orden));
+    }
+
+    private void verificarStockBajo(List<Producto> productos) {
+        for (Producto producto : productos) {
+            if (producto.requiereReabastecimiento()) {
+                publicadorEventos.publicar(new StockBajoEvent(
+                    producto.getId(),
+                    producto.getNombre(),
+                    producto.getStockActual(),
+                    producto.getUmbralStock()
+                ));
+            }
+        }
+    }
+}
+```
+
+---
+
+## DTO de Respuesta {.smaller}
+
+```java
+package com.arka.aplicacion.ordenes.dto;
+
+import com.arka.dominio.compartido.valores.Dinero;
+import com.arka.dominio.ordenes.entidades.OrdenDeCompra;
+
+import java.time.LocalDateTime;
+
+public class OrdenConfirmadaDTO {
+    private final String ordenId;
+    private final String estado;
+    private final String total;
+    private final String moneda;
+    private final LocalDateTime fechaConfirmacion;
+    private final int cantidadProductos;
+
+    private OrdenConfirmadaDTO(String ordenId, String estado, String total,
+                               String moneda, LocalDateTime fechaConfirmacion,
+                               int cantidadProductos) {
+        this.ordenId = ordenId;
+        this.estado = estado;
+        this.total = total;
+        this.moneda = moneda;
+        this.fechaConfirmacion = fechaConfirmacion;
+        this.cantidadProductos = cantidadProductos;
+    }
+
+    public static OrdenConfirmadaDTO from(OrdenDeCompra orden, Dinero total) {
+        return new OrdenConfirmadaDTO(
+            orden.getId().toString(),
+            orden.getEstado().name(),
+            total.getMonto().toString(),
+            total.getMoneda(),
+            LocalDateTime.now(),
+            orden.getLineas().size()
+        );
+    }
+
+    // Getters...
+}
+```
+
+
+
+# Estructura de Paquetes DDD
+
+Una buena estructura de paquetes refleja los conceptos de DDD y facilita la navegación del código.
+
+---
+
+## Estructura Recomendada para Arka {.smaller}
+
+```
+com.arka/
+├── dominio/                          # Capa de Dominio
+│   ├── compartido/                   # Elementos compartidos
+│   │   ├── eventos/
+│   │   │   ├── EventoDominio.java
+│   │   │   └── PublicadorEventos.java
+│   │   └── valores/
+│   │       ├── Dinero.java
+│   │       └── Direccion.java
+│   │
+│   ├── inventario/                   # Bounded Context: Inventario
+│   │   ├── entidades/
+│   │   │   └── Producto.java
+│   │   ├── valores/
+│   │   │   └── ProductoId.java
+│   │   ├── eventos/
+│   │   │   └── StockBajoEvent.java
+│   │   ├── servicios/
+│   │   │   └── AlertaStockService.java
+│   │   └── puertos/
+│   │       └── ProductoRepository.java
+│   │
+│   └── ordenes/                      # Bounded Context: Órdenes
+│       ├── entidades/
+│       │   ├── OrdenDeCompra.java
+│       │   └── LineaOrden.java
+│       ├── valores/
+│       │   ├── OrdenId.java
+│       │   └── EstadoOrden.java
+│       ├── eventos/
+│       │   └── OrdenConfirmadaEvent.java
+│       ├── servicios/
+│       │   ├── ValidacionStockService.java
+│       │   └── CalculoPrecioService.java
+│       └── puertos/
+│           └── OrdenRepository.java
+│
+├── aplicacion/                       # Capa de Aplicación
+│   ├── ordenes/
+│   │   ├── ConfirmarOrdenUseCase.java
+│   │   ├── CrearOrdenUseCase.java
+│   │   └── dto/
+│   │       └── OrdenConfirmadaDTO.java
+│   └── inventario/
+│       ├── ActualizarStockUseCase.java
+│       └── GenerarReporteStockUseCase.java
+│
+└── infraestructura/                  # Capa de Infraestructura
+    ├── persistencia/
+    │   ├── ProductoRepositoryImpl.java
+    │   └── OrdenRepositoryImpl.java
+    ├── eventos/
+    │   ├── PublicadorEventosSpring.java
+    │   └── listeners/
+    │       ├── NotificacionOrdenListener.java
+    │       └── AlertaStockListener.java
+    └── web/
+        └── OrdenesController.java
+```
+
+---
+
+## Dependencias entre Capas {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Infraestructura"
+        WEB[Controllers]
+        REPO[Repositorios Impl]
+        EV[Event Listeners]
+    end
+
+    subgraph "Aplicación"
+        UC[Use Cases]
+        DTO[DTOs]
+    end
+
+    subgraph "Dominio"
+        ENT[Entidades]
+        VO[Value Objects]
+        SD[Servicios Dominio]
+        PORTS[Puertos/Interfaces]
+        EVI[Eventos]
+    end
+
+    WEB --> UC
+    UC --> ENT
+    UC --> SD
+    UC --> PORTS
+    REPO --> PORTS
+    EV --> EVI
+```
+
+::: {.callout-note}
+El dominio **no depende de nada externo**. Todo depende del dominio.
+:::
+
+# Flujo Completo del Sistema Arka
+
+Veamos cómo fluyen los datos desde que un cliente confirma una orden hasta que se procesan todos los eventos.
+
+---
+
+## Diagrama de Flujo Completo {.smaller}
+
+::: { style="transform: scale(1.09)"}
+```{mermaid}
+sequenceDiagram
+    participant CL as Cliente
+    participant API as API REST
+    participant UC as ConfirmarOrdenUseCase
+    participant DOM as Dominio
+    participant DB as Base de Datos
+    participant EVT as Sistema de Eventos
+    participant NOT as Notificaciones
+    participant INV as Módulo Inventario
+    participant REP as Módulo Reportes
+
+    CL->>API: POST /ordenes/{id}/confirmar
+    API->>UC: ejecutar(ordenId)
+    UC->>DB: buscar orden y productos
+    DB-->>UC: orden, productos
+    UC->>DOM: orden.confirmar()
+    DOM-->>UC: eventos generados
+    UC->>DB: guardar cambios
+    UC->>EVT: publicar eventos
+
+    par Procesamiento Paralelo
+        EVT->>NOT: OrdenConfirmadaEvent
+        NOT->>CL: Email confirmación
+    and
+        EVT->>INV: StockBajoEvent (si aplica)
+        INV->>INV: Generar alerta reabastecimiento
+    and
+        EVT->>REP: OrdenConfirmadaEvent
+        REP->>REP: Actualizar estadísticas
+    end
+
+    API-->>CL: 200 OK + OrdenConfirmadaDTO
+```
+:::
+
+---
+
+## Estados de una Orden en Arka {.smaller}
+
+```{mermaid}
+stateDiagram-v2
+    [*] --> PENDIENTE: Cliente crea orden
+
+    PENDIENTE --> PENDIENTE: Agregar/Quitar productos
+    PENDIENTE --> CONFIRMADA: Cliente confirma
+    PENDIENTE --> CANCELADA: Cliente cancela
+    PENDIENTE --> ABANDONADA: Sin actividad (timeout)
+
+    CONFIRMADA --> EN_DESPACHO: Preparar envío
+
+    EN_DESPACHO --> ENTREGADA: Confirmar entrega
+    EN_DESPACHO --> DEVUELTA: Cliente rechaza
+
+    ENTREGADA --> [*]
+    CANCELADA --> [*]
+    ABANDONADA --> [*]
+    DEVUELTA --> [*]
+```
+
+
+
+# Resumen y Conclusiones
+
+---
+
+## Conceptos Clave {.smaller}
+
+| Concepto | Descripción | Ejemplo en Arka |
+|----------|-------------|-----------------|
+| **Entidad** | Objeto con identidad única | `Producto`, `OrdenDeCompra` |
+| **Value Object** | Objeto inmutable sin identidad | `Dinero`, `ProductoId` |
+| **Agregado** | Cluster de entidades con raíz | `OrdenDeCompra` + `LineaOrden` |
+| **Servicio de Dominio** | Lógica que no pertenece a una entidad | `ValidacionStockService` |
+| **Evento de Dominio** | Algo que ocurrió en el dominio | `OrdenConfirmadaEvent` |
+
+---
+
+## ¿Por qué usar DDD? {.smaller}
+
+```{mermaid}
+mindmap
+  root((Beneficios DDD))
+    Código Expresivo
+      Refleja el negocio
+      Fácil de entender
+      Documentación viva
+    Mantenibilidad
+      Cambios localizados
+      Bajo acoplamiento
+      Alta cohesión
+    Testabilidad
+      Dominio aislado
+      Tests unitarios simples
+      Eventos verificables
+    Escalabilidad
+      Bounded Contexts
+      Microservicios naturales
+      Eventos para comunicación
+```
+
+---
+
+## Recursos Adicionales {.smaller}
+
+**Libros recomendados:**
+
+- "Domain-Driven Design" - Eric Evans
+- "Implementing Domain-Driven Design" - Vaughn Vernon
+- "Domain-Driven Design Distilled" - Vaughn Vernon
+
+**Recursos en línea:**
+
+- [DDD Community](https://www.domainlanguage.com/)
+- [Martin Fowler - DDD](https://martinfowler.com/tags/domain%20driven%20design.html)
+
+# ¡Gracias!
