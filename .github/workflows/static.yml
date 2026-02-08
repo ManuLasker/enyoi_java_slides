@@ -69,6 +69,10 @@ jobs:
           if [ -d "clase_10_11_solid_presentation" ]; then
             cp -r clase_10_11_solid_presentation _site/
           fi
+
+          if [ -d "clase_10_11_solid_practice" ]; then
+            cp -r clase_10_11_solid_practice _site/
+          fi
           
           # Copy Docusaurus build
           cp -r lab_1_docker_localstack/build _site/lab_1_docker_localstack
