@@ -46,10 +46,10 @@ jobs:
       # Build all Quarto presentations
       - name: Build Quarto slides
         run: |
-          quarto render clase_12_13_14_temas_faltantes_ia --to revealjs
-          quarto render clase_15_16_17_arquitectura_hexagonal --to revealjs
-          quarto render clase_18_19_ddd_eventos_servicios_dominio --to revealjs
-          quarto render clase_22_23_docker --to revealjs
+          quarto render clase_12_13_14_temas_faltantes_ia/index.qmd
+          quarto render clase_15_16_17_arquitectura_hexagonal/index.qmd
+          quarto render clase_18_19_ddd_eventos_servicios_dominio/index.qmd
+          quarto render clase_22_23_docker/index.qmd
       
       # Prepare combined output (only built content)
       - name: Prepare deploy folder
