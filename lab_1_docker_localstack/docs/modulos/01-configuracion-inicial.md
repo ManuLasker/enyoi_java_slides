@@ -76,12 +76,18 @@ volumes:
   postgres-data:
 ```
 
+```markdown
 ## 1.3 Instalar awslocal
 
-`awslocal` es un wrapper del AWS CLI que automáticamente apunta a LocalStack:
+:::info Requisito previo
+Para utilizar `awslocal`, primero debes tener instalado el **AWS CLI** oficial en tu sistema. Puedes seguir la [guía de instalación oficial de AWS](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+:::
+
+`awslocal` es un wrapper del AWS CLI que automáticamente apunta a LocalStack, eliminando la necesidad de especificar el parámetro `--endpoint-url` en cada comando:
 
 ```bash
 pip install awscli-local
+```
 ```
 
 ## 1.4 Iniciar servicios
