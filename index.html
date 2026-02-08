@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 
 <head>
   <meta charset="UTF-8">
@@ -259,7 +259,7 @@
 <body>
   <header>
     <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
-      <span id="theme-icon">🌙</span>
+      <span id="theme-icon">☀️</span>
     </button>
     <div class="logo">enyoi</div>
     <p class="tagline">Programa de Formación en Java</p>
@@ -344,13 +344,12 @@
   </footer>
 
   <script>
-    // Check for saved theme preference or default to system preference
+    // Check for saved theme preference, default is dark
     const savedTheme = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      document.getElementById('theme-icon').textContent = '☀️';
+    if (savedTheme === 'light') {
+      document.documentElement.removeAttribute('data-theme');
+      document.getElementById('theme-icon').textContent = '🌙';
     }
 
     function toggleTheme() {
