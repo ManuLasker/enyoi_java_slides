@@ -1,0 +1,1087 @@
+---
+title: Docker & Docker Compose
+subtitle: Contenedorización para Desarrollo Java - Teoría y Práctica
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "Docker & Docker Compose - ENYOI"
+---
+
+# Introducción a Docker
+
+**Docker** es una plataforma de contenedorización que permite empaquetar aplicaciones con todas sus dependencias en unidades estandarizadas llamadas **contenedores**.
+
+::: {.callout-tip}
+**Navegación**: Usa ↓ para profundizar en un tema, → para pasar al siguiente tema
+:::
+
+---
+
+## ¿Por qué Docker? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Problemas sin Docker:**
+
+- "En mi máquina funciona"
+- Instalación manual de dependencias
+- Configuraciones diferentes por ambiente
+- Conflictos de versiones
+- Despliegues inconsistentes
+:::
+
+::: {.column width="50%"}
+**Docker soluciona:**
+
+- Ambientes reproducibles
+- Aislamiento de aplicaciones
+- Portabilidad total
+- Consistencia dev → prod
+- Infraestructura como código
+:::
+:::
+
+---
+
+## Arquitectura Docker {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Cliente Docker"
+        CLI[docker CLI]
+        API[Docker API]
+    end
+    
+    subgraph "Docker Host"
+        DAEMON[Docker Daemon]
+        subgraph "Contenedores"
+            C1[Container 1]
+            C2[Container 2]
+            C3[Container 3]
+        end
+        subgraph "Imágenes"
+            I1[Image 1]
+            I2[Image 2]
+        end
+    end
+    
+    subgraph "Registry"
+        HUB[Docker Hub]
+        PRIV[Private Registry]
+    end
+    
+    CLI --> API
+    API --> DAEMON
+    DAEMON --> C1
+    DAEMON --> C2
+    DAEMON --> C3
+    DAEMON --> I1
+    DAEMON --> I2
+    DAEMON <--> HUB
+    DAEMON <--> PRIV
+```
+
+---
+
+## Imagen vs Contenedor {.smaller}
+
+| Concepto | Descripción | Analogía |
+|----------|-------------|----------|
+| **Imagen** | Plantilla de solo lectura con el sistema de archivos y configuración | Clase en Java |
+| **Contenedor** | Instancia ejecutable de una imagen | Objeto/Instancia |
+| **Dockerfile** | Archivo con instrucciones para construir una imagen | Código fuente |
+| **Registry** | Repositorio de imágenes | Maven Central / npm |
+
+---
+
+## Primer Contenedor {.smaller}
+
+```bash
+# Descargar y ejecutar imagen de Java
+docker run -it eclipse-temurin:21-jdk java --version
+
+# Ejecutar contenedor en segundo plano (daemon)
+docker run -d --name mi-postgres postgres:16
+
+# Ver contenedores en ejecución
+docker ps
+
+# Ver todos los contenedores (incluidos detenidos)
+docker ps -a
+
+# Detener y eliminar contenedor
+docker stop mi-postgres
+docker rm mi-postgres
+```
+
+::: {.callout-note}
+`-it` = interactivo + TTY, `-d` = daemon (segundo plano)
+:::
+
+---
+
+## Comandos Esenciales {.smaller}
+
+```{mermaid}
+mindmap
+  root((docker))
+    Imágenes
+      docker pull
+      docker build
+      docker images
+      docker rmi
+    Contenedores
+      docker run
+      docker start/stop
+      docker exec
+      docker logs
+      docker rm
+    Sistema
+      docker system df
+      docker system prune
+    Info
+      docker ps
+      docker inspect
+```
+
+
+
+# Dockerfile
+
+Un **Dockerfile** es un archivo de texto con instrucciones para construir una imagen Docker de forma automatizada y reproducible.
+
+---
+
+## Instrucciones Básicas {.smaller}
+
+| Instrucción | Descripción | Ejemplo |
+|-------------|-------------|---------|
+| `FROM` | Imagen base | `FROM eclipse-temurin:21-jdk` |
+| `WORKDIR` | Directorio de trabajo | `WORKDIR /app` |
+| `COPY` | Copiar archivos locales | `COPY build/libs/*.jar app.jar` |
+| `RUN` | Ejecutar comando al construir | `RUN apt-get update` |
+| `ENV` | Variable de entorno | `ENV JAVA_OPTS="-Xmx512m"` |
+| `EXPOSE` | Puerto que expone el contenedor | `EXPOSE 8080` |
+| `CMD` | Comando al iniciar contenedor | `CMD ["java", "-jar", "app.jar"]` |
+| `ENTRYPOINT` | Ejecutable principal | `ENTRYPOINT ["java"]` |
+
+---
+
+## Dockerfile Simple para Java {.smaller}
+
+```dockerfile
+# Imagen base con JDK 21
+FROM eclipse-temurin:21-jdk
+
+# Directorio de trabajo dentro del contenedor
+WORKDIR /app
+
+# Copiar el JAR compilado
+COPY build/libs/mi-aplicacion.jar app.jar
+
+# Puerto que expone la aplicación
+EXPOSE 8080
+
+# Variables de entorno
+ENV JAVA_OPTS="-Xmx512m -Xms256m"
+
+# Comando para ejecutar la aplicación
+CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+```
+
+---
+
+## Problema: Imágenes Pesadas {.smaller}
+
+```{mermaid}
+graph LR
+    subgraph "Imagen Tradicional (~800MB)"
+        JDK[JDK Completo]
+        MVN[Gradle + Dependencias]
+        SRC[Código Fuente]
+        JAR[JAR Final]
+    end
+```
+
+::: {.callout-warning}
+**Problema**: Incluimos herramientas de compilación que NO necesitamos en producción.
+:::
+
+**Solución**: Multi-stage builds
+
+---
+
+## Multi-Stage Build para Java {.smaller}
+
+```dockerfile
+# === STAGE 1: Build ===
+FROM eclipse-temurin:21-jdk AS builder
+
+WORKDIR /build
+
+# Copiar archivos de Gradle (cache de dependencias)
+COPY build.gradle settings.gradle gradlew ./
+COPY gradle ./gradle
+COPY src ./src
+
+# Compilar la aplicación
+RUN ./gradlew bootJar --no-daemon
+
+# === STAGE 2: Runtime ===
+FROM eclipse-temurin:21-jre
+
+WORKDIR /app
+
+# Copiar SOLO el JAR desde el stage anterior
+COPY --from=builder /build/build/libs/*.jar app.jar
+
+# Usuario no-root por seguridad
+RUN useradd -r -u 1001 appuser
+USER appuser
+
+EXPOSE 8080
+
+CMD ["java", "-jar", "app.jar"]
+```
+
+---
+
+## Comparación de Tamaños {.smaller}
+
+::: {style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+%%{init: {'theme': 'dark'}}%%
+xychart-beta
+    title "Tamaño de Imagen Docker"
+    x-axis ["JDK + Gradle", "JDK Only", "JRE Multi-stage", "JRE + jlink"]
+    y-axis "Tamaño (MB)" 0 --> 800
+    bar [750, 450, 280, 150]
+```
+
+::: {.callout-tip}
+Con **multi-stage** + **JRE** reducimos ~60% del tamaño de la imagen.
+:::
+
+:::
+
+
+---
+
+## Optimización de Capas {.smaller}
+
+
+* **MAL**: Invalida cache en cada cambio de código
+```dockerfile
+COPY . .
+RUN ./gradlew bootJar
+```
+
+* **BIEN**: Aprovecha cache de dependencias
+```dockerfile
+COPY build.gradle settings.gradle gradlew ./
+COPY gradle ./gradle
+RUN ./gradlew dependencies --no-daemon
+COPY src ./src
+RUN ./gradlew bootJar --no-daemon
+```
+
+```{mermaid}
+graph LR
+    A[build.gradle] --> B[Dependencias]
+    B --> C[Código src]
+    C --> D[Build JAR]
+    
+    style B fill:#50fa7b,color:#000
+    style C fill:#ffb86c,color:#000
+```
+
+::: {.callout-note}
+Las capas que **no cambian** se reutilizan del cache.
+:::
+
+---
+
+## Construir y Ejecutar {.smaller}
+
+```bash
+# Construir imagen con tag
+docker build -t mi-app:1.0 .
+
+# Ver capas de la imagen
+docker history mi-app:1.0
+
+# Ejecutar contenedor
+docker run -d -p 8080:8080 --name mi-app-container mi-app:1.0
+
+# Ver logs
+docker logs -f mi-app-container
+
+# Ejecutar comando dentro del contenedor
+docker exec -it mi-app-container /bin/bash
+```
+
+
+
+# Volúmenes
+
+Los **volúmenes** permiten persistir datos y compartir archivos entre el host y los contenedores.
+
+---
+
+## ¿Por qué Volúmenes? {.smaller}
+
+```{mermaid}
+graph TB
+    subgraph "Sin Volumen"
+        C1[Contenedor] --> D1[Datos internos]
+        D1 --> X[❌ Se pierden al eliminar]
+    end
+```
+
+```{mermaid}
+graph TB
+    subgraph "Con Volumen"
+        C2[Contenedor] --> V[Volumen]
+        V --> D2[Datos persistentes]
+        D2 --> OK[✅ Sobreviven al contenedor]
+    end
+```
+
+---
+
+## Tipos de Volúmenes {.smaller}
+
+| Tipo | Sintaxis | Uso Principal |
+|------|----------|---------------|
+| **Named Volume** | `myvolume:/app/data` | Persistencia gestionada por Docker |
+| **Bind Mount** | `./local:/container/path` | Desarrollo, compartir código |
+| **tmpfs** | `--tmpfs /tmp` | Datos temporales en memoria |
+
+---
+
+## Named Volumes {.smaller}
+
+::: {style="font-size: 0.8em;"}
+```bash
+# Crear volumen
+docker volume create postgres-data
+
+# Usar volumen en contenedor
+docker run -d \
+  --name postgres \
+  -v postgres-data:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=secret \
+  postgres:16
+
+# Listar volúmenes
+docker volume ls
+
+# Inspeccionar volumen
+docker volume inspect postgres-data
+
+# Eliminar volumen
+docker volume rm postgres-data
+```
+:::
+
+::: {.callout-tip}
+Los **named volumes** sobreviven a los contenedores y son respaldados por Docker.
+:::
+
+::: {.callout-note}
+**¿Dónde se guardan?** En Linux: `/var/lib/docker/volumes/<nombre>/_data`. Usa `docker volume inspect <nombre>` para ver la ruta exacta.
+:::
+
+---
+
+## Bind Mounts para Desarrollo {.smaller}
+
+```bash
+# Montar código fuente local en el contenedor
+docker run -d \
+  --name dev-app \
+  -v $(pwd)/src:/app/src \
+  -v $(pwd)/build.gradle.kts:/app/build.gradle.kts \
+  -p 8080:8080 \
+  mi-app:dev
+
+# Hot-reload: cambios locales se reflejan inmediatamente
+```
+
+```{mermaid}
+graph LR
+    subgraph "Host"
+        L["./src<br/>Código local"]
+    end
+    
+    subgraph "Contenedor"
+        C["/app/src<br/>Montado"]
+    end
+    
+    L <-->|Bind Mount| C
+```
+
+---
+
+## Permisos en Volúmenes {.smaller}
+
+```dockerfile
+# Crear usuario con UID específico
+RUN groupadd -g 1000 appgroup && \
+    useradd -u 1000 -g appgroup appuser
+
+# Crear directorio para datos
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
+
+# Cambiar a usuario no-root
+USER appuser
+
+# Definir volumen
+VOLUME /app/data
+```
+
+::: {.callout-warning}
+**Problema común**: Permisos 755 del host vs usuario del contenedor. Usa `--user $(id -u):$(id -g)` en desarrollo.
+:::
+
+
+
+# Networking
+
+Docker proporciona diferentes drivers de red para la comunicación entre contenedores y con el mundo exterior.
+
+---
+
+## Drivers de Red {.smaller}
+
+| Driver | Descripción | Caso de Uso |
+|--------|-------------|-------------|
+| **bridge** | Red aislada por defecto | Contenedores en mismo host |
+| **host** | Comparte red del host | Rendimiento máximo |
+| **none** | Sin red | Aislamiento total |
+| **overlay** | Red entre múltiples hosts | Docker Swarm / Kubernetes |
+
+---
+
+## Red Bridge por Defecto {.smaller}
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+graph TB
+    subgraph "Docker Host"
+        subgraph "bridge (docker0)"
+            C1[App<br/>172.17.0.2]
+            C2[DB<br/>172.17.0.3]
+        end
+    end
+    
+    EXT[Internet] -->|Puerto publicado| C1
+    C1 <-->|IP interna| C2
+```
+
+::: {.callout-note}
+Los contenedores en la red bridge **por defecto** se comunican por IP, no por nombre.
+:::
+:::
+
+---
+
+## Redes Personalizadas {.smaller}
+
+```bash
+# Crear red personalizada
+docker network create mi-red
+
+# Conectar contenedores a la red
+docker run -d --name postgres --network mi-red postgres:16
+docker run -d --name app --network mi-red mi-app:1.0
+
+# Los contenedores se resuelven por NOMBRE
+# Desde 'app': jdbc:postgresql://postgres:5432/db
+```
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+graph LR
+    subgraph "mi-red (user-defined bridge)"
+        APP[app] <-->|DNS: postgres| DB[postgres]
+    end
+```
+::: {.callout-tip}
+**Redes personalizadas** proporcionan resolución DNS automática por nombre de contenedor.
+:::
+
+:::
+
+
+---
+
+## Publicar Puertos {.smaller}
+
+```bash
+# Mapear puerto específico
+docker run -p 8080:8080 mi-app
+
+# Mapear a puerto aleatorio del host
+docker run -p 8080 mi-app
+
+# Mapear solo a localhost (más seguro)
+docker run -p 127.0.0.1:8080:8080 mi-app
+
+# Mapear múltiples puertos
+docker run -p 8080:8080 -p 5005:5005 mi-app
+```
+</br>
+
+| Sintaxis | Significado |
+|----------|-------------|
+| `-p 8080:8080` | Host 8080 → Container 8080 |
+| `-p 3000:8080` | Host 3000 → Container 8080 |
+| `-p 127.0.0.1:8080:8080` | Solo localhost |
+
+---
+
+## Comunicación entre Contenedores {.smaller}
+
+```bash
+# Crear red
+docker network create arka-network
+
+# PostgreSQL
+docker run -d \
+  --name arka-db \
+  --network arka-network \
+  -e POSTGRES_USER=arka \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=arka \
+  postgres:16
+
+# Aplicación Java
+docker run -d \
+  --name arka-api \
+  --network arka-network \
+  -e DATABASE_URL=jdbc:postgresql://arka-db:5432/arka \
+  -e DATABASE_USER=arka \
+  -e DATABASE_PASSWORD=secret \
+  -p 8080:8080 \
+  arka-api:1.0
+```
+
+
+
+# Variables de Entorno
+
+Las **variables de entorno** permiten configurar aplicaciones sin modificar el código ni la imagen.
+
+---
+
+## Métodos para Definir Variables {.smaller}
+
+```bash
+# 1. Línea de comando (-e)
+docker run -e DATABASE_URL=jdbc:postgresql://db:5432/app mi-app
+
+# 2. Archivo de variables (--env-file)
+docker run --env-file .env mi-app
+
+# 3. En Dockerfile (ENV) - valor por defecto
+ENV JAVA_OPTS="-Xmx512m"
+```
+
+---
+
+## Archivo .env {.smaller}
+
+```properties
+# .env - Variables de entorno
+DATABASE_URL=jdbc:postgresql://localhost:5432/arka
+DATABASE_USER=arka
+DATABASE_PASSWORD=supersecret
+JAVA_OPTS=-Xmx512m -Xms256m
+SPRING_PROFILES_ACTIVE=development
+```
+
+::: {.callout-warning}
+**NUNCA** commits `.env` con secretos reales. Usa `.env.example` como plantilla.
+:::
+
+---
+
+## ARG vs ENV {.smaller}
+
+| Característica | ARG | ENV |
+|----------------|-----|-----|
+| Disponible en build | Sí | Sí |
+| Disponible en runtime | No | Sí |
+| Override en `docker run` | No | Sí |
+| Caso de uso | Versiones, tokens de build | Configuración de app |
+
+</br>
+
+```dockerfile
+# ARG: solo en tiempo de build
+ARG JAR_VERSION=1.0.0
+
+# ENV: disponible en el contenedor
+ENV APP_VERSION=$JAR_VERSION
+ENV SPRING_PROFILES_ACTIVE=production
+```
+
+---
+
+## Variables en Spring Boot {.smaller}
+
+```yaml
+# application.yml
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/arka}
+    username: ${DATABASE_USER:arka}
+    password: ${DATABASE_PASSWORD:}
+  
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+```
+
+::: {.callout-tip}
+Spring Boot automáticamente mapea `SPRING_DATASOURCE_URL` → `spring.datasource.url`
+:::
+
+
+
+# Health Checks
+
+Los **health checks** permiten a Docker verificar si un contenedor está funcionando correctamente.
+
+---
+
+## HEALTHCHECK en Dockerfile {.smaller}
+
+```dockerfile
+FROM eclipse-temurin:21-jre
+
+WORKDIR /app
+COPY build/libs/*.jar app.jar
+
+# Health check con curl
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+EXPOSE 8080
+CMD ["java", "-jar", "app.jar"]
+```
+
+</br>
+
+| Parámetro | Descripción | Default |
+|-----------|-------------|---------|
+| `--interval` | Tiempo entre checks | 30s |
+| `--timeout` | Tiempo máximo de espera | 30s |
+| `--start-period` | Tiempo inicial sin checks | 0s |
+| `--retries` | Intentos antes de unhealthy | 3 |
+
+---
+
+## Estados de Salud {.smaller}
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+stateDiagram-v2
+    [*] --> starting: Container starts
+    starting --> healthy: Health check passes
+    starting --> unhealthy: Retries exceeded
+    healthy --> unhealthy: Health check fails (3x)
+    unhealthy --> healthy: Health check passes
+```
+
+```bash
+# Ver estado de salud
+docker ps
+# CONTAINER ID   STATUS                    
+# abc123         Up 5 min (healthy)
+# def456         Up 2 min (unhealthy)
+
+# Detalles del health check
+docker inspect --format='{{json .State.Health}}' mi-app | jq
+```
+:::
+
+
+---
+
+## Spring Boot Actuator {.smaller}
+
+```groovy
+// build.gradle
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+}
+```
+
+```yaml
+# application.yml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+```
+
+Endpoints disponibles:
+
+- `/actuator/health` - Estado general
+- `/actuator/health/liveness` - ¿Está vivo?
+- `/actuator/health/readiness` - ¿Listo para recibir tráfico?
+
+
+
+# Docker Compose
+
+**Docker Compose** permite definir y ejecutar aplicaciones multi-contenedor usando un archivo YAML declarativo.
+
+---
+
+## ¿Por qué Docker Compose? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Sin Compose:**
+
+```bash
+docker network create app-net
+docker run -d --name db \
+  --network app-net \
+  -e POSTGRES_PASSWORD=secret \
+  -v pgdata:/var/lib/postgresql/data \
+  postgres:16
+docker run -d --name app \
+  --network app-net \
+  -e DATABASE_URL=... \
+  -p 8080:8080 \
+  mi-app:1.0
+```
+:::
+
+::: {.column width="50%"}
+**Con Compose:**
+
+```bash
+docker compose up -d
+```
+
+Un solo comando.
+Versionado en Git.
+Reproducible.
+:::
+:::
+
+---
+
+## Estructura docker-compose.yml {.smaller}
+
+```yaml
+# Versión del formato (opcional en v2+)
+version: "3.9"
+
+services:       # Contenedores a ejecutar
+  app:
+    ...
+  db:
+    ...
+
+networks:       # Redes personalizadas
+  app-network:
+    ...
+
+volumes:        # Volúmenes persistentes
+  postgres-data:
+    ...
+```
+
+---
+
+## Ejemplo Completo: Java + PostgreSQL {.smaller}
+
+```yaml
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=jdbc:postgresql://db:5432/arka
+      - DATABASE_USER=arka
+      - DATABASE_PASSWORD=${DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - arka-network
+
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=arka
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=arka
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arka"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arka-network
+
+networks:
+  arka-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+```
+
+---
+
+## Comandos Docker Compose {.smaller}
+
+```bash
+# Iniciar todos los servicios
+docker compose up -d
+
+# Ver logs de todos los servicios
+docker compose logs -f
+
+# Ver logs de un servicio específico
+docker compose logs -f app
+
+# Estado de los servicios
+docker compose ps
+
+# Detener servicios
+docker compose stop
+
+# Detener y eliminar contenedores, redes
+docker compose down
+
+# Eliminar también volúmenes
+docker compose down -v
+
+# Reconstruir imágenes
+docker compose build
+docker compose up -d --build
+```
+
+---
+
+## depends_on Avanzado {.smaller}
+
+```yaml
+services:
+  app:
+    depends_on:
+      db:
+        condition: service_healthy    # Esperar health check
+      redis:
+        condition: service_started    # Solo que inicie
+      migrations:
+        condition: service_completed_successfully  # Que termine OK
+```
+
+```{mermaid}
+graph LR
+    M[migrations] -->|completed| A[app]
+    D[db] -->|healthy| A
+    R[redis] -->|started| A
+```
+
+---
+
+## Profiles para Ambientes {.smaller}
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```yaml
+services:
+  app:
+    # Siempre activo
+    build: .
+    ...
+
+  db:
+    # Siempre activo
+    image: postgres:16
+    ...
+
+  pgadmin:
+    # Solo en desarrollo
+    profiles: ["dev"]
+    image: dpage/pgadmin4
+    ports:
+      - "5050:80"
+    ...
+
+  prometheus:
+    # Solo en monitoreo
+    profiles: ["monitoring"]
+    image: prom/prometheus
+    ...
+```
+
+```bash
+# Solo servicios base
+docker compose up -d
+
+# Con herramientas de desarrollo
+docker compose --profile dev up -d
+
+# Con monitoreo
+docker compose --profile monitoring up -d
+```
+:::
+---
+
+## Variables y Archivos .env {.smaller}
+
+```properties
+# .env
+POSTGRES_VERSION=16
+DB_PASSWORD=supersecret
+APP_PORT=8080
+```
+
+```yaml
+# docker-compose.yml
+services:
+  db:
+    image: postgres:${POSTGRES_VERSION}
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+  
+  app:
+    ports:
+      - "${APP_PORT}:8080"
+```
+
+::: {.callout-tip}
+Docker Compose lee automáticamente `.env` del directorio actual.
+:::
+
+---
+
+## Extender Configuraciones {.smaller}
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```yaml
+# docker-compose.yml (base)
+services:
+  app:
+    build: .
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+```
+
+```yaml
+# docker-compose.override.yml (desarrollo - auto-cargado)
+services:
+  app:
+    volumes:
+      - ./src:/app/src
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - DEBUG=true
+```
+
+```yaml
+# docker-compose.prod.yml (producción)
+services:
+  app:
+    image: registry.example.com/arka-api:${VERSION}
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+    deploy:
+      replicas: 3
+```
+
+```bash
+# Desarrollo (usa override automáticamente)
+docker compose up -d
+
+# Producción
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+:::
+
+
+
+# Próximo Paso: Lab Práctico
+
+Ahora que conocemos la teoría, ¡es hora de practicar!
+
+---
+
+## Lab: LocalStack Infrastructure {.smaller}
+
+En el siguiente laboratorio práctico vamos a:
+
+1. **Configurar LocalStack** con Docker Compose
+2. **Desplegar servicios AWS** localmente:
+   - S3 para almacenamiento
+   - SQS para mensajería
+   - Lambda + API Gateway
+   - RDS (PostgreSQL)
+   - Secrets Manager
+   - Cognito
+3. **Usar CloudFormation** para infraestructura como código
+
+::: {.callout-tip}
+Accede al lab en: `lab-localstack/index.html`
+:::
+
+---
+
+## Resumen {.smaller}
+
+| Concepto | Qué Aprendimos |
+|----------|----------------|
+| **Docker** | Contenedorización, imágenes, contenedores |
+| **Dockerfile** | Multi-stage builds, optimización de capas |
+| **Volúmenes** | Named volumes, bind mounts, persistencia |
+| **Networking** | Bridge, redes personalizadas, DNS interno |
+| **Variables** | ENV, ARG, .env files, secretos |
+| **Health Checks** | Monitoreo de salud, Spring Actuator |
+| **Docker Compose** | Orquestación multi-contenedor, profiles |
+
+---
+
+## Recursos {.smaller}
+
+- [Docker Documentation](https://docs.docker.com/)
+- [Docker Compose Specification](https://docs.docker.com/compose/compose-file/)
+- [LocalStack Documentation](https://docs.localstack.cloud/)
+- [Spring Boot Docker Guide](https://spring.io/guides/topicals/spring-boot-docker)
