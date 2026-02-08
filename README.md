@@ -3,3 +3,4 @@
 3. https://manulasker.github.io/enyoi_java_slides/clase_15_16_17_arquitectura_hexagonal/
 4. https://manulasker.github.io/enyoi_java_slides/clase_12_13_14_temas_faltantes_ia/
 5. https://manulasker.github.io/enyoi_java_slides/clase_18_19_ddd_eventos_servicios_dominio/
+6. https://manulasker.github.io/enyoi_java_slides/clase_22_23_docker/
