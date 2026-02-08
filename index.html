@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ENYOI Java - Programa de Formación</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Light mode - Purple theme */
+      --bg-primary: #fafafa;
+      --bg-secondary: #ffffff;
+      --bg-card: #ffffff;
+      --text-primary: #1a1a2e;
+      --text-secondary: #4a4a6a;
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --border: #e5e7eb;
+      --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --card-shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+
+    [data-theme="dark"] {
+      /* Dracula theme */
+      --bg-primary: #282a36;
+      --bg-secondary: #1e1f29;
+      --bg-card: #343746;
+      --text-primary: #f8f8f2;
+      --text-secondary: #b8b8c8;
+      --accent: #bd93f9;
+      --accent-hover: #ff79c6;
+      --border: #44475a;
+      --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      --card-shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      transition: background 0.3s, color 0.3s;
+    }
+
+    /* Header */
+    header {
+      background: linear-gradient(135deg, var(--accent) 0%, #4c1d95 100%);
+      padding: 4rem 2rem;
+      text-align: center;
+      position: relative;
+    }
+
+    [data-theme="dark"] header {
+      background: linear-gradient(135deg, #44475a 0%, #282a36 100%);
+    }
+
+    .logo {
+      font-size: 3rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.5rem;
+    }
+
+    [data-theme="dark"] .logo {
+      color: var(--accent);
+    }
+
+    .tagline {
+      font-size: 1.25rem;
+      color: rgba(255, 255, 255, 0.9);
+      margin-bottom: 1.5rem;
+    }
+
+    [data-theme="dark"] .tagline {
+      color: var(--text-secondary);
+    }
+
+    /* Theme toggle */
+    .theme-toggle {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      padding: 0.75rem;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 1.25rem;
+      transition: background 0.3s;
+    }
+
+    .theme-toggle:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Main content */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem;
+    }
+
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* Cards grid */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 3rem;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-decoration: none;
+      color: var(--text-primary);
+      box-shadow: var(--card-shadow);
+      transition: all 0.3s ease;
+      display: block;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--card-shadow-hover);
+      border-color: var(--accent);
+    }
+
+    .card-icon {
+      font-size: 2rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .card-desc {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .card-tag {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      margin-top: 1rem;
+    }
+
+    /* Lab card special styling */
+    .card-lab {
+      background: linear-gradient(135deg, var(--accent) 0%, #4c1d95 100%);
+      color: #fff;
+      border: none;
+    }
+
+    [data-theme="dark"] .card-lab {
+      background: linear-gradient(135deg, var(--accent) 0%, #6d28d9 100%);
+    }
+
+    .card-lab .card-desc {
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .card-lab .card-tag {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+      border-top: 1px solid var(--border);
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    /* Stats */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 3rem;
+      margin-top: 1.5rem;
+    }
+
+    .stat {
+      text-align: center;
+      color: #fff;
+    }
+
+    [data-theme="dark"] .stat {
+      color: var(--text-secondary);
+    }
+
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    [data-theme="dark"] .stat-value {
+      color: var(--accent);
+    }
+
+    .stat-label {
+      font-size: 0.875rem;
+      opacity: 0.9;
+    }
+
+    @media (max-width: 640px) {
+      .logo {
+        font-size: 2rem;
+      }
+
+      .tagline {
+        font-size: 1rem;
+      }
+
+      .stats {
+        gap: 1.5rem;
+      }
+
+      .stat-value {
+        font-size: 1.5rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
+      <span id="theme-icon">🌙</span>
+    </button>
+    <div class="logo">enyoi</div>
+    <p class="tagline">Programa de Formación en Java</p>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value">6</div>
+        <div class="stat-label">Presentaciones</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">1</div>
+        <div class="stat-label">Laboratorio</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">7+</div>
+        <div class="stat-label">Tecnologías</div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <h2 class="section-title">📚 Presentaciones</h2>
+    <div class="cards">
+      <a href="clase_10_11_solid_presentation/" class="card">
+        <div class="card-icon">🏗️</div>
+        <div class="card-title">Principios SOLID</div>
+        <div class="card-desc">Los 5 principios fundamentales del diseño orientado a objetos para crear código
+          mantenible y escalable.</div>
+        <span class="card-tag">Clase 10-11</span>
+      </a>
+
+      <a href="clase_10_11_solid_practice/" class="card">
+        <div class="card-icon">💻</div>
+        <div class="card-title">Práctica SOLID</div>
+        <div class="card-desc">Ejercicios prácticos para aplicar los principios SOLID en código real.</div>
+        <span class="card-tag">Clase 10-11</span>
+      </a>
+
+      <a href="clase_12_13_14_temas_faltantes_ia/" class="card">
+        <div class="card-icon">🤖</div>
+        <div class="card-title">Temas Avanzados + IA</div>
+        <div class="card-desc">Temas complementarios y uso de Inteligencia Artificial en el desarrollo.</div>
+        <span class="card-tag">Clase 12-14</span>
+      </a>
+
+      <a href="clase_15_16_17_arquitectura_hexagonal/" class="card">
+        <div class="card-icon">🔷</div>
+        <div class="card-title">Arquitectura Hexagonal</div>
+        <div class="card-desc">Ports & Adapters: Diseño de aplicaciones desacopladas y testeables.</div>
+        <span class="card-tag">Clase 15-17</span>
+      </a>
+
+      <a href="clase_18_19_ddd_eventos_servicios_dominio/" class="card">
+        <div class="card-icon">🎯</div>
+        <div class="card-title">DDD: Eventos y Servicios</div>
+        <div class="card-desc">Domain-Driven Design: Eventos de dominio y servicios para modelar la lógica de negocio.
+        </div>
+        <span class="card-tag">Clase 18-19</span>
+      </a>
+
+      <a href="clase_22_23_docker/" class="card">
+        <div class="card-icon">🐳</div>
+        <div class="card-title">Docker y Contenedores</div>
+        <div class="card-desc">Containerización de aplicaciones con Docker y Docker Compose.</div>
+        <span class="card-tag">Clase 22-23</span>
+      </a>
+    </div>
+
+    <h2 class="section-title">🧪 Laboratorios</h2>
+    <div class="cards">
+      <a href="lab_1_docker_localstack/" class="card card-lab">
+        <div class="card-icon">☁️</div>
+        <div class="card-title">Lab: Docker + LocalStack</div>
+        <div class="card-desc">Workshop práctico: Configura infraestructura AWS local con Docker Compose, S3, SQS,
+          Lambda, Cognito y más.</div>
+        <span class="card-tag">3 horas</span>
+      </a>
+    </div>
+  </main>
+
+  <footer>
+    <p>Creado para <a href="https://github.com/ManuLasker/enyoi_java_slides">ENYOI Java</a></p>
+  </footer>
+
+  <script>
+    // Check for saved theme preference or default to system preference
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.getElementById('theme-icon').textContent = '☀️';
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const icon = document.getElementById('theme-icon');
+
+      if (html.getAttribute('data-theme') === 'dark') {
+        html.removeAttribute('data-theme');
+        icon.textContent = '🌙';
+        localStorage.setItem('theme', 'light');
+      } else {
+        html.setAttribute('data-theme', 'dark');
+        icon.textContent = '☀️';
+        localStorage.setItem('theme', 'dark');
+      }
+    }
+  </script>
+</body>
+
+</html>
