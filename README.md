@@ -4,3 +4,4 @@
 4. https://manulasker.github.io/enyoi_java_slides/clase_12_13_14_temas_faltantes_ia/
 5. https://manulasker.github.io/enyoi_java_slides/clase_18_19_ddd_eventos_servicios_dominio/
 6. https://manulasker.github.io/enyoi_java_slides/clase_22_23_docker/
+7. https://manulasker.github.io/enyoi_java_slides/lab_1_docker_localstack/

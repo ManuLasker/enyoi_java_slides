@@ -1,5 +1,5 @@
-# Workflow for deploying static content to GitHub Pages (including Docusaurus)
-name: Deploy static content to Pages
+# Workflow for building and deploying all content to GitHub Pages
+name: Build and Deploy to Pages
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      # Build Docusaurus lab
+      # Setup Node.js for Docusaurus
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -30,23 +30,75 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'lab_1_docker_localstack/package-lock.json'
       
-      - name: Install dependencies
-        working-directory: lab_1_docker_localstack
-        run: npm ci
+      # Setup Quarto
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: '1.4.550'
       
+      # Build Docusaurus lab
       - name: Build Docusaurus
         working-directory: lab_1_docker_localstack
-        run: npm run build
+        run: |
+          npm ci
+          npm run build
       
-      # Prepare combined output
+      # Build all Quarto presentations
+      - name: Build Quarto slides
+        run: |
+          quarto render clase_12_13_14_temas_faltantes_ia --to revealjs
+          quarto render clase_15_16_17_arquitectura_hexagonal --to revealjs
+          quarto render clase_18_19_ddd_eventos_servicios_dominio --to revealjs
+          quarto render clase_22_23_docker --to revealjs
+      
+      # Prepare combined output (only built content)
       - name: Prepare deploy folder
         run: |
           mkdir -p _site
-          # Copy all static presentations
-          cp -r clase_* _site/ 2>/dev/null || true
-          cp -r README.md _site/ 2>/dev/null || true
+          
+          # Copy Quarto builds (HTML + assets)
+          for dir in clase_12_13_14_temas_faltantes_ia clase_15_16_17_arquitectura_hexagonal clase_18_19_ddd_eventos_servicios_dominio clase_22_23_docker; do
+            mkdir -p _site/$dir
+            cp -r $dir/index.html _site/$dir/ 2>/dev/null || true
+            cp -r $dir/index_files _site/$dir/ 2>/dev/null || true
+            cp -r $dir/images _site/$dir/ 2>/dev/null || true
+            cp -r $dir/img _site/$dir/ 2>/dev/null || true
+          done
+          
+          # Copy Marp slides (already HTML)
+          if [ -d "clase_10_11_solid_presentation" ]; then
+            cp -r clase_10_11_solid_presentation _site/
+          fi
+          
           # Copy Docusaurus build
           cp -r lab_1_docker_localstack/build _site/lab_1_docker_localstack
+          
+          # Create root index with links
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>ENYOI Java Slides</title>
+            <style>
+              body { font-family: system-ui; max-width: 800px; margin: 50px auto; padding: 20px; }
+              a { display: block; padding: 10px; margin: 5px 0; background: #f0f0f0; text-decoration: none; border-radius: 5px; }
+              a:hover { background: #e0e0e0; }
+            </style>
+          </head>
+          <body>
+            <h1>ENYOI Java Slides</h1>
+            <a href="clase_10_11_solid_presentation/">Clase 10-11: SOLID</a>
+            <a href="clase_12_13_14_temas_faltantes_ia/">Clase 12-14: Temas Faltantes IA</a>
+            <a href="clase_15_16_17_arquitectura_hexagonal/">Clase 15-17: Arquitectura Hexagonal</a>
+            <a href="clase_18_19_ddd_eventos_servicios_dominio/">Clase 18-19: DDD Eventos y Servicios</a>
+            <a href="clase_22_23_docker/">Clase 22-23: Docker</a>
+            <a href="lab_1_docker_localstack/">Lab 1: Docker + LocalStack</a>
+          </body>
+          </html>
+          EOF
+          
+          # Copy README
+          cp README.md _site/ 2>/dev/null || true
       
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
