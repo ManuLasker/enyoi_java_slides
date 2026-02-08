@@ -1,0 +1,97 @@
+/**
+ * Dracula Theme - https://draculatheme.com/
+ */
+
+:root {
+  --ifm-color-primary: #7c3aed;
+  --ifm-color-primary-dark: #6d28d9;
+  --ifm-color-primary-darker: #5b21b6;
+  --ifm-color-primary-darkest: #4c1d95;
+  --ifm-color-primary-light: #8b5cf6;
+  --ifm-color-primary-lighter: #a78bfa;
+  --ifm-color-primary-lightest: #c4b5fd;
+  --ifm-code-font-size: 95%;
+  --ifm-background-color: #fafafa;
+}
+
+[data-theme='dark'] {
+  --ifm-background-color: #282a36;
+  --ifm-background-surface-color: #343746;
+  --ifm-navbar-background-color: #21222c;
+  --ifm-footer-background-color: #1e1f29;
+  --ifm-color-primary: #bd93f9;
+  --ifm-color-primary-dark: #a76df6;
+  --ifm-color-primary-darker: #9c5af5;
+  --ifm-color-primary-darkest: #7b22f1;
+  --ifm-color-primary-light: #d3b9fc;
+  --ifm-color-primary-lighter: #decbfd;
+  --ifm-color-primary-lightest: #f4edfe;
+  --ifm-font-color-base: #f8f8f2;
+  --ifm-heading-color: #f8f8f2;
+  --docusaurus-highlighted-code-line-bg: rgba(189, 147, 249, 0.2);
+}
+
+/* Hero banner para light mode - más oscuro y elegante */
+.hero--primary {
+  background: linear-gradient(135deg, #4c1d95 0%, #7c3aed 100%);
+  color: #ffffff;
+}
+
+.hero--primary .hero__title {
+  color: #ffffff;
+}
+
+.hero--primary .button--secondary {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #7c3aed;
+  font-weight: 600;
+}
+
+.hero--primary .button--secondary:hover {
+  background: #f3f4f6;
+  border-color: #f3f4f6;
+}
+
+/* Cards en light mode */
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.card:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+/* Hero banner oscuro estilo Dracula */
+[data-theme='dark'] .hero--primary {
+  background: linear-gradient(135deg, #44475a 0%, #282a36 100%);
+  color: #f8f8f2;
+}
+
+[data-theme='dark'] .hero--primary .hero__title {
+  color: #bd93f9;
+}
+
+[data-theme='dark'] .hero--primary .button--secondary {
+  background: #bd93f9;
+  border-color: #bd93f9;
+  color: #282a36;
+}
+
+[data-theme='dark'] .hero--primary .button--secondary:hover {
+  background: #ff79c6;
+  border-color: #ff79c6;
+}
+
+/* Cards en dark mode */
+[data-theme='dark'] .card {
+  background: #343746;
+  border: 1px solid #44475a;
+}
+
+[data-theme='dark'] .card:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+  border-color: #bd93f9;
+}
