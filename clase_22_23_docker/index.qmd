@@ -1045,26 +1045,6 @@ Ahora que conocemos la teoría, ¡es hora de practicar!
 
 ---
 
-## Lab: LocalStack Infrastructure {.smaller}
-
-En el siguiente laboratorio práctico vamos a:
-
-1. **Configurar LocalStack** con Docker Compose
-2. **Desplegar servicios AWS** localmente:
-   - S3 para almacenamiento
-   - SQS para mensajería
-   - Lambda + API Gateway
-   - RDS (PostgreSQL)
-   - Secrets Manager
-   - Cognito
-3. **Usar CloudFormation** para infraestructura como código
-
-::: {.callout-tip}
-Accede al lab en: `lab-localstack/index.html`
-:::
-
----
-
 ## Resumen {.smaller}
 
 | Concepto | Qué Aprendimos |
