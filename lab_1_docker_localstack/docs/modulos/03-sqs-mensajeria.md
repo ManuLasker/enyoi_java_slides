@@ -11,7 +11,7 @@ sidebar_position: 3
 ## 3.1 CloudFormation para SQS
 
 :::note Archivo a crear
-`cloudformation/sqs-queues.yml`
+`cloudformation/sqs-queues.yaml`
 :::
 
 ```yaml
@@ -57,7 +57,7 @@ Outputs:
 # Desplegar
 awslocal cloudformation deploy \
   --stack-name sqs-stack \
-  --template-file cloudformation/sqs-queues.yml
+  --template-file cloudformation/sqs-queues.yaml
 
 # Listar colas
 awslocal sqs list-queues

@@ -48,7 +48,7 @@ cd ..
 ## 5.3 CloudFormation para Lambda + API Gateway
 
 :::note Archivo a crear
-`cloudformation/lambda-api.yml`
+`cloudformation/lambda-api.yaml`
 :::
 
 ```yaml
@@ -79,21 +79,9 @@ Resources:
       Runtime: python3.11
       Handler: healthcheck.handler
       Role: !GetAtt LambdaExecutionRole.Arn
-      Code:
-        ZipFile: |
-          import json
-          from datetime import datetime
-          
-          def handler(event, context):
-              return {
-                  "statusCode": 200,
-                  "headers": {"Content-Type": "application/json"},
-                  "body": json.dumps({
-                      "status": "healthy",
-                      "timestamp": datetime.now().isoformat(),
-                      "service": "arka-api"
-                  })
-              }
+      Code: 
+        S3Bucket: "lambda-code-dev"
+        S3Key: "lambda-healthcheck.zip"
       Timeout: 30
       MemorySize: 128
 
@@ -165,7 +153,7 @@ Outputs:
 ```bash
 awslocal cloudformation deploy \
   --stack-name lambda-api-stack \
-  --template-file cloudformation/lambda-api.yml \
+  --template-file cloudformation/lambda-api.yaml \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
@@ -212,4 +200,4 @@ sequenceDiagram
 
 ---
 
-**Siguiente:** [Módulo 6: Cognito](./cognito)
+**Siguiente:** [Módulo 6: Stack Completo](./stack-completo)

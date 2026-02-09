@@ -11,7 +11,7 @@ sidebar_position: 2
 ## 2.1 CloudFormation para S3
 
 :::note Archivo a crear
-`cloudformation/s3-buckets.yml`
+`cloudformation/s3-buckets.yaml`
 :::
 
 ```yaml
@@ -51,6 +51,12 @@ Resources:
             Status: Enabled
             ExpirationInDays: 90
 
+  # Lambda buckets
+  LambdasBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "lambda-code-${Environment}"
+
 Outputs:
   ProductosBucketName:
     Value: !Ref ProductosBucket
@@ -65,7 +71,7 @@ Outputs:
 ```bash
 awslocal cloudformation deploy \
   --stack-name s3-stack \
-  --template-file cloudformation/s3-buckets.yml \
+  --template-file cloudformation/s3-buckets.yaml \
   --parameter-overrides Environment=dev
 ```
 

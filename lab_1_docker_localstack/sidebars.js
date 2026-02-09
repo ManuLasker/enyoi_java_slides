@@ -12,7 +12,6 @@ const sidebars = {
         'modulos/sqs-mensajeria',
         'modulos/secrets-manager',
         'modulos/lambda-api-gateway',
-        'modulos/cognito',
         'modulos/stack-completo',
       ],
     },

@@ -15,15 +15,13 @@ mkdir -p localstack-lab/cloudformation
 cd localstack-lab
 ```
 
-## 1.2 Crear docker-compose.yml
+## 1.2 Crear docker-compose.yaml
 
 :::note Archivo a crear
-`docker-compose.yml`
+`docker-compose.yaml`
 :::
 
 ```yaml
-version: "3.9"
-
 services:
   localstack:
     image: localstack/localstack:latest
@@ -34,13 +32,13 @@ services:
     environment:
       - DEBUG=1
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - SERVICES=s3,sqs,lambda,apigateway,secretsmanager,cognito-idp
+      - SERVICES=s3,sqs,lambda,apigateway,secretsmanager,cloudformation,iam,logs
       - DEFAULT_REGION=us-east-1
       - CFN_IGNORE_UNSUPPORTED_RESOURCE_TYPES=1
     volumes:
-      - "./localstack-data:/var/lib/localstack"
+      - "localstack-data:/var/lib/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
-      - "./cloudformation:/etc/localstack/init/ready.d"
+      - "./cloudformation:/etc/localstack/init/ready.d/cloudformation"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
@@ -74,20 +72,21 @@ networks:
 
 volumes:
   postgres-data:
+  localstack-data:
 ```
 
-```markdown
 ## 1.3 Instalar awslocal
 
-:::info Requisito previo
-Para utilizar `awslocal`, primero debes tener instalado el **AWS CLI** oficial en tu sistema. Puedes seguir la [guía de instalación oficial de AWS](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+:::info Requisitos previos
+Para utilizar `awslocal`, debes tener instalado en tu sistema:
+- **Python** (3.7 o superior).
+- **AWS CLI** (v1 o v2). Puedes seguir la [guía de instalación oficial de AWS](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
 :::
 
 `awslocal` es un wrapper del AWS CLI que automáticamente apunta a LocalStack, eliminando la necesidad de especificar el parámetro `--endpoint-url` en cada comando:
 
 ```bash
 pip install awscli-local
-```
 ```
 
 ## 1.4 Iniciar servicios

@@ -12,7 +12,7 @@ En este laboratorio aprenderás a:
 
 - Configurar **LocalStack** con Docker Compose
 - Desplegar servicios AWS localmente usando **CloudFormation**
-- Trabajar con S3, SQS, Lambda, API Gateway, Secrets Manager y Cognito
+- Trabajar con S3, SQS, Lambda, API Gateway y Secrets Manager
 
 ## Prerrequisitos
 
@@ -35,7 +35,6 @@ graph TB
         LAM[Lambda]
         API[API Gateway]
         SEC[Secrets Manager]
-        COG[Cognito]
     end
     
     LS --> S3
@@ -43,7 +42,6 @@ graph TB
     LS --> LAM
     LS --> API
     LS --> SEC
-    LS --> COG
 ```
 
 ## Servicios que Usaremos
@@ -55,7 +53,6 @@ graph TB
 | **Secrets Manager** | Almacenar credenciales de forma segura |
 | **Lambda** | Funciones serverless |
 | **API Gateway** | Exponer endpoints REST |
-| **Cognito** | Autenticación de usuarios |
 
 ## ¿Por qué LocalStack?
 

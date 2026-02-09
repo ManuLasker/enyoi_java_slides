@@ -11,7 +11,7 @@ sidebar_position: 4
 ## 4.1 CloudFormation para Secrets
 
 :::note Archivo a crear
-`cloudformation/secrets-manager.yml`
+`cloudformation/secrets-manager.yaml`
 :::
 
 ```yaml
@@ -54,7 +54,7 @@ Outputs:
 # Desplegar
 awslocal cloudformation deploy \
   --stack-name secrets-stack \
-  --template-file cloudformation/secrets-manager.yml
+  --template-file cloudformation/secrets-manager.yaml
 
 # Listar secretos
 awslocal secretsmanager list-secrets
@@ -72,7 +72,7 @@ Debes ver las credenciales de la base de datos en formato JSON
 ## Uso en Spring Boot
 
 ```yaml
-# application.yml
+# application.yaml
 spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}

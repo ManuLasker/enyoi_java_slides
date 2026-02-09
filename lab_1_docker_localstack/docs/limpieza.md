@@ -40,7 +40,6 @@ rm output.json
 | **Secrets Manager** | Almacenar credenciales de forma segura |
 | **Lambda** | Crear y probar funciones Python |
 | **API Gateway** | Exponer Lambda como REST API |
-| **Cognito** | Configurar User Pool y autenticación |
 | **CloudFormation** | Infrastructure as Code |
 
 ## Próximos Pasos
