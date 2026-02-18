@@ -1,0 +1,1457 @@
+---
+title: Patrones de Arquitectura de Microservicios & EDA
+subtitle: Diseñando Sistemas Distribuidos Resilientes - Caso Arka
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "Patrones de Microservicios & EDA - ENYOI"
+---
+
+# De Monolito a Microservicios
+
+Entendiendo **por qué** y **cuándo** descomponer un sistema monolítico en servicios independientes.
+
+::: {.callout-tip}
+**Navegación**: Usa ↓ para profundizar en un tema, → para pasar al siguiente tema
+:::
+
+---
+
+## ¿Qué es un Monolito? {.smaller}
+
+Un sistema donde **toda la lógica** (UI, negocio, datos) vive en un solo desplegable.
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+graph TB
+    subgraph "Monolito - Arka Actual"
+        UI[Interfaz Web]
+        BL[Lógica de Negocio]
+        subgraph "Módulos Acoplados"
+            INV[Inventario]
+            ORD[Órdenes]
+            PAY[Pagos]
+            NOT[Notificaciones]
+        end
+        DB[(Base de Datos Única)]
+    end
+
+    UI --> BL
+    BL --> INV
+    BL --> ORD
+    BL --> PAY
+    BL --> NOT
+    INV --> DB
+    ORD --> DB
+    PAY --> DB
+    NOT --> DB
+
+    style DB fill:#ff5555,color:#fff
+    style INV fill:#ffb86c,color:#000
+    style ORD fill:#ffb86c,color:#000
+```
+
+::: {.callout-warning}
+**Problema Arka**: Ventas concurrentes causan **race conditions** → stock negativo (sobreventa).
+:::
+:::
+
+---
+
+## ¿Qué son los Microservicios? {.smaller}
+
+Arquitectura donde la aplicación se compone de **servicios pequeños, autónomos** que se comunican entre sí.
+
+```{mermaid}
+graph TB
+    CLIENT[Clientes] --> GW[API Gateway]
+
+    subgraph "Microservicios"
+        GW --> PS[Product Service]
+        GW --> OS[Order Service]
+        GW --> IS[Inventory Service]
+        GW --> PAS[Payment Service]
+    end
+
+    PS --> DB1[(Products DB)]
+    OS --> DB2[(Orders DB)]
+    IS --> DB3[(Inventory DB)]
+    PAS --> DB4[(Payments DB)]
+    
+    OS -.->|Eventos| BROKER[Message Broker]
+    IS -.->|Eventos| BROKER
+    PAS -.->|Eventos| BROKER
+
+    style GW fill:#bd93f9,color:#fff
+    style BROKER fill:#ff79c6,color:#fff
+    style DB1 fill:#50fa7b,color:#000
+    style DB2 fill:#50fa7b,color:#000
+    style DB3 fill:#50fa7b,color:#000
+    style DB4 fill:#50fa7b,color:#000
+```
+
+---
+
+## Monolito vs Microservicios {.smaller}
+
+| Característica | Monolito | Microservicios |
+|----------------|----------|----------------|
+| **Despliegue** | Todo junto | Independiente por servicio |
+| **Escalabilidad** | Vertical (más recursos al servidor) | Horizontal (más instancias del servicio) |
+| **Tecnología** | Un solo stack | Polyglot (cada servicio puede usar diferente) |
+| **Base de datos** | Compartida | Una por servicio |
+| **Equipo** | Un equipo grande | Equipos pequeños por servicio |
+| **Fallo** | Un error tumba todo | Fallo aislado por servicio |
+| **Complejidad** | Simple al inicio | Complejidad operacional alta |
+| **Transacciones** | ACID fácil | Consistencia eventual |
+
+::: {.callout-note}
+No todo debe ser microservicios. **"Monolith First"** es una estrategia válida (Martin Fowler).
+:::
+
+---
+
+## ¿Cuándo Migrar? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**SÍ migrar cuando:**
+
+- El equipo crece y hay conflictos en el código
+- Necesitas escalar partes específicas
+- Los deploys son lentos y riesgosos
+- **Caso Arka**: Necesitas manejar concurrencia a nivel de servicio
+:::
+
+::: {.column width="50%"}
+**NO migrar cuando:**
+
+- Equipo pequeño (< 5 devs)
+- El dominio no está bien entendido
+- No tienes infraestructura de CI/CD
+- La aplicación es simple y funcional
+:::
+:::
+
+::: {.callout-tip}
+**Regla de oro**: Si no puedes gestionar un monolito bien, los microservicios lo harán 10x peor.
+:::
+
+
+
+# Patrones de Comunicación
+
+¿Cómo se **hablan** los microservicios entre sí?
+
+---
+
+## Comunicación Síncrona {.smaller}
+
+El servicio que llama **espera** la respuesta antes de continuar.
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+sequenceDiagram
+    participant C as Order Service
+    participant I as Inventory Service
+    participant P as Payment Service
+
+    C->>+I: POST /api/inventory/reserve
+    Note over C,I: ⏳ Esperando...
+    I-->>-C: 200 OK (Stock Reservado)
+    
+    C->>+P: POST /api/payments/process
+    Note over C,P: ⏳ Esperando...
+    P-->>-C: 200 OK (Pago Procesado)
+```
+
+**Protocolos comunes**: REST (HTTP/JSON), gRPC (HTTP/2 + Protobuf)
+
+::: {.callout-warning}
+**Riesgo**: Si un servicio está lento o caído, el que llama se bloquea → **cascading failure**.
+:::
+:::
+
+---
+
+## Comunicación Asíncrona {.smaller}
+
+El servicio emisor **publica un evento** y continúa sin esperar respuesta.
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+sequenceDiagram
+    participant O as Order Service
+    participant K as Kafka Broker
+    participant I as Inventory Service
+    participant P as Payment Service
+
+    O->>K: Publicar OrderCreated
+    Note over O: Continúa inmediatamente
+    
+    K-->>I: Consumir OrderCreated
+    Note over I: Procesa en su propio ritmo
+    I->>K: Publicar StockReserved
+    
+    K-->>P: Consumir StockReserved
+    Note over P: Procesa en su propio ritmo
+    P->>K: Publicar PaymentProcessed
+```
+
+::: {.callout-tip}
+**Ventaja**: Desacoplamiento total. Los servicios no necesitan conocerse entre sí.
+:::
+:::
+
+---
+
+## Comparativa de Comunicación {.smaller}
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+::: {.columns}
+::: {.column width="60%"}
+| Aspecto | Síncrona | Asíncrona |
+|---------|----------|-----------|
+| **Acoplamiento** | Temporal (espera) | Desacoplado |
+| **Latencia** | Suma de todas las llamadas | Solo la publicación |
+| **Confiabilidad** | Cadena de dependencias | Tolerante a fallos |
+| **Complejidad** | Fácil de entender | Más difícil de debuggear |
+| **Consistencia** | Inmediata | Eventual |
+| **Caso de uso** | Consultas, validaciones | Comandos, notificaciones |
+:::
+::: {.column width="20%"}
+```{mermaid}
+graph LR
+    subgraph "Síncrona"
+        A[Service A] -->|HTTP/gRPC| B[Service B]
+    end
+```
+:::
+::: {.column width="20%"}
+```{mermaid}
+graph LR
+    subgraph "Asíncrona"
+        C[Service C] -->|Publish| Q[Broker]
+        Q -->|Subscribe| D[Service D]
+    end
+
+    style Q fill:#ff79c6,color:#fff
+```
+:::
+:::
+:::
+
+# API Gateway Pattern
+
+Un **punto de entrada único** para todos los clientes externos.
+
+---
+
+## ¿Qué es el API Gateway? {.smaller}
+
+```{mermaid}
+graph TB
+    WEB[Web App] --> GW
+    MOB[Mobile App] --> GW
+    EXT[Third Party] --> GW
+    
+    subgraph "API Gateway"
+        GW[Gateway]
+        AUTH[Autenticación]
+        RL[Rate Limiting]
+        LB[Load Balancing]
+        CACHE[Cache]
+    end
+    
+    GW --> S1[Product Service]
+    GW --> S2[Order Service]
+    GW --> S3[Inventory Service]
+    GW --> S4[Payment Service]
+
+    style GW fill:#bd93f9,color:#fff
+    style AUTH fill:#50fa7b,color:#000
+    style RL fill:#ffb86c,color:#000
+    style LB fill:#8be9fd,color:#000
+    style CACHE fill:#f1fa8c,color:#000
+```
+
+---
+
+## Responsabilidades del Gateway {.smaller}
+
+| Función | Descripción |
+|---------|-------------|
+| **Routing** | Dirige la petición al servicio correcto |
+| **Autenticación/Autorización** | Valida tokens JWT, API Keys |
+| **Rate Limiting** | Limita peticiones por cliente |
+| **Load Balancing** | Distribuye carga entre instancias |
+| **Circuit Breaking** | Protege contra servicios caídos |
+| **Transformación** | Adapta request/response |
+| **Caching** | Cache de respuestas frecuentes |
+| **Logging/Monitoring** | Observabilidad centralizada |
+
+**Herramientas populares**: Spring Cloud Gateway, Kong, NGINX, AWS API Gateway
+
+---
+
+## Backend for Frontend (BFF) {.smaller}
+
+Variante donde **cada tipo de cliente** tiene su propio gateway optimizado.
+
+```{mermaid}
+graph TB
+    WEB[Web App] --> BFF_WEB[BFF Web]
+    MOB[Mobile App] --> BFF_MOB[BFF Mobile]
+    IOT[IoT Devices] --> BFF_IOT[BFF IoT]
+    
+    BFF_WEB --> S1[Product Service]
+    BFF_WEB --> S2[Order Service]
+    BFF_MOB --> S1
+    BFF_MOB --> S3[Inventory Service]
+    BFF_IOT --> S3
+
+    style BFF_WEB fill:#bd93f9,color:#fff
+    style BFF_MOB fill:#ff79c6,color:#fff
+    style BFF_IOT fill:#ffb86c,color:#000
+```
+
+::: {.callout-tip}
+**BFF** permite optimizar la respuesta para cada cliente: el móvil recibe menos datos, la web más.
+:::
+
+---
+
+## API Gateway vs BFF {.smaller}
+
+| Característica | API Gateway | Backend for Frontend (BFF) |
+|---|---|---|
+| **Enfoque** | Único punto de entrada para todos | Múltiples gateways, uno por tipo de cliente |
+| **Adaptabilidad** | "Talla única" (One size fits all) | A medida para cada cliente (Tailored) |
+| **Propiedad** | Equipo de Plataforma / Backend | Equipo de Frontend / Producto |
+| **Ventaja** | Simplicidad y centralización | Optimización de UX y performance |
+| **Riesgo** | Cuello de botella (Bottleneck) | Duplicación de lógica y complejidad |
+
+::: {.callout-note}
+El BFF no reemplaza necesariamente al API Gateway; a menudo **coexisten**. El API Gateway maneja cross-cutting concerns (SSL, Auth) y enruta a los BFFs.
+:::
+
+
+
+# Service Discovery
+
+¿Cómo **encuentra** un servicio la dirección de otro servicio?
+
+---
+
+## El Problema {.smaller}
+
+En un entorno dinámico (contenedores, auto-scaling), las **IPs y puertos cambian** constantemente.
+
+```{mermaid}
+graph LR
+    A[Order Service] -->|"¿IP:Puerto?"| B[Inventory Service]
+    
+    B --> I1["Instancia 1 (172.17.0.5:8080)"]
+    B --> I2["Instancia 2 (172.17.0.8:8080)"]
+    B --> I3["Instancia 3 (172.17.0.12:8080)"]
+
+    style I1 fill:#50fa7b,color:#000
+    style I2 fill:#50fa7b,color:#000
+    style I3 fill:#ff5555,color:#fff
+```
+
+::: {.callout-note}
+Hardcodear URLs (`http://192.168.1.100:8080`) es **frágil** y no escala.
+:::
+
+---
+
+## Client-Side vs Server-Side {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Client-Side Discovery**
+
+```{mermaid}
+graph TB
+    C[Client] --> R[Service Registry]
+    R --> C
+    C --> S1[Instance 1]
+    C --> S2[Instance 2]
+    
+    style R fill:#8be9fd,color:#000
+```
+
+El cliente consulta el registro y decide qué instancia llamar.
+
+*Ejemplo*: Netflix Eureka, Spring Cloud
+:::
+
+::: {.column width="50%"}
+**Server-Side Discovery**
+
+```{mermaid}
+graph TB
+    C[Client] --> LB[Load Balancer]
+    LB --> R[Service Registry]
+    LB --> S1[Instance 1]
+    LB --> S2[Instance 2]
+    
+    style LB fill:#bd93f9,color:#fff
+    style R fill:#8be9fd,color:#000
+```
+
+Un load balancer consulta el registro y rutea al cliente.
+
+*Ejemplo*: Kubernetes Services, AWS ELB
+:::
+:::
+
+::: {.callout-tip}
+**Docker Compose** ya provee service discovery básico con DNS por nombre de servicio.
+:::
+
+
+
+# Circuit Breaker Pattern
+
+**Protección** contra fallos en cascada en sistemas distribuidos.
+
+---
+
+## El Problema: Cascading Failures {.smaller}
+
+```{mermaid}
+graph LR
+    A[Order Service] -->|"Llamada"| B[Inventory Service]
+    B -->|"Llamada"| C[Warehouse Service]
+    C -->|"💥 CAÍDO"| X[Timeout]
+    
+    X -.->|"⏳ Espera 30s"| B
+    B -.->|"⏳ Espera 30s"| A
+    A -.->|"❌ Thread Pool se agota"| CRASH["🔥 Cascading Failure"]
+
+    style X fill:#ff5555,color:#fff
+    style CRASH fill:#ff5555,color:#fff
+```
+
+::: {.callout-warning}
+Un solo servicio lento/caído puede **tumbar toda la cadena** de llamadas.
+:::
+
+---
+
+## Estados del Circuit Breaker {.smaller}
+
+::: { .columns }
+
+::: {.column width="70%"}
+```{mermaid}
+stateDiagram-v2
+    [*] --> Closed: Inicio
+    
+    Closed --> Open: Fallos >= Umbral
+    note right of Closed: ✅ Peticiones pasan normal
+    
+    Open --> HalfOpen: Timeout expirado
+    note right of Open: ❌ Peticiones rechazadas <br/> inmediatamente
+    
+    HalfOpen --> Closed: Prueba exitosa
+    HalfOpen --> Open: Prueba falla
+    note right of HalfOpen: 🔄 Permite pocas <br/> peticiones de prueba
+```
+:::
+
+::: {.column width="30%"}
+| Estado | Comportamiento |
+|--------|---------------|
+| **Closed** | Todo funciona normal, se cuentan fallos |
+| **Open** | Todas las peticiones son rechazadas (fail-fast) |
+| **Half-Open** | Se permiten pocas peticiones de prueba |
+:::
+:::
+
+---
+
+## Ejemplo con Resilience4j {.smaller}
+
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+
+```java
+// Configuración del Circuit Breaker
+@Bean
+public CircuitBreakerConfig circuitBreakerConfig() {
+    return CircuitBreakerConfig.custom()
+        .failureRateThreshold(50)        // 50% de fallos activa el breaker
+        .waitDurationInOpenState(Duration.ofSeconds(30)) // Espera antes de Half-Open
+        .slidingWindowSize(10)           // Ventana de evaluación
+        .minimumNumberOfCalls(5)         // Mínimo de llamadas para evaluar
+        .build();
+}
+```
+
+```java
+// Uso en un servicio reactivo
+@Service
+public class InventoryClient {
+    private final CircuitBreaker circuitBreaker;
+    private final WebClient webClient;
+
+    public Mono<StockResponse> checkStock(String sku) {
+        return webClient.get()
+            .uri("/api/inventory/{sku}", sku)
+            .retrieve()
+            .bodyToMono(StockResponse.class)
+            .transformDeferred(CircuitBreakerOperator.of(circuitBreaker))
+            .onErrorResume(e -> Mono.just(StockResponse.unavailable()));
+    }
+}
+```
+
+::: {.callout-tip}
+**Fallback**: Cuando el circuit breaker está abierto, retornar una respuesta por defecto en vez de fallar.
+:::
+:::
+
+
+
+# Database per Service
+
+Cada microservicio **posee y gestiona** su propia base de datos.
+
+---
+
+## Shared DB vs DB per Service {.smaller}
+
+::: columns
+::: {.column width="40%" style="padding-right: 5%;"}
+**❌ Base de Datos Compartida**
+
+```{mermaid}
+graph TB
+    S1[Order Service] --> DB[(Shared DB)]
+    S2[Inventory Service] --> DB
+    S3[Payment Service] --> DB
+    
+    style DB fill:#ff5555,color:#fff
+```
+
+- Acoplamiento a nivel de datos
+- Un cambio de schema afecta todos
+- No puedes escalar independientemente
+:::
+
+::: {.column width="40%"}
+**✅ Database per Service**
+
+```{mermaid}
+graph TB
+    S1[Order Service] --> DB1[(Orders DB)]
+    S2[Inventory Service] --> DB2[(Inventory DB)]
+    S3[Payment Service] --> DB3[(Payments DB)]
+    
+    style DB1 fill:#50fa7b,color:#000
+    style DB2 fill:#50fa7b,color:#000
+    style DB3 fill:#50fa7b,color:#000
+```
+
+- Autonomía total por servicio
+- Cada equipo elige su tecnología
+- Escala independientemente
+:::
+:::
+
+---
+
+## El Gran Desafío: Consultas Cruzadas {.smaller}
+
+::: { .columns }
+::: {.column width="50%"}
+::: { style="transform: scale(0.8); transform-origin: top left;"}
+```{mermaid}
+graph LR
+    QUERY["Consulta: Órdenes con<br/>detalle de producto<br/>y estado de pago"]
+    
+    QUERY --> OS[Order Service<br/>Orders DB]
+    QUERY --> PS[Product Service<br/>Products DB]
+    QUERY --> PAS[Payment Service<br/>Payments DB]
+    
+    style QUERY fill:#ffb86c,color:#000
+```
+:::
+:::
+
+::: {.column width="50%"}
+**¿Cómo hacer JOINs entre servicios?** No puedes hacer `SELECT ... JOIN` entre bases de datos separadas. Necesitas otras estrategias:
+
+| Estrategia | Descripción |
+|------------|-------------|
+| **API Composition** | Un servicio agrega datos de múltiples servicios |
+| [**CQRS**](#cqrs-command-query-responsibility-segregation) | Modelo de lectura separado, alimentado por eventos |
+| [**Saga**](#patrón-saga) | Transacciones distribuidas por pasos |
+:::
+:::
+
+---
+
+## Estrategia: API Composition {.smaller}
+
+Un servicio **agregador** consulta múltiples servicios y combina las respuestas.
+
+::: { .columns }
+::: { .column width="70%"}
+::: { style="transform: scale(1.0); transform-origin: top left;"}
+```{mermaid}
+graph TB
+    CLIENT[Cliente] --> AGG[API Composer / Aggregator]
+    
+    AGG --> OS[Order Service]
+    AGG --> PS[Product Service]
+    AGG --> PAS[Payment Service]
+    
+    OS --> R1["{ orderId, sku, qty }"]
+    PS --> R2["{ sku, name, price }"]
+    PAS --> R3["{ orderId, status }"]
+    
+    R1 --> MERGE["Combinar → Respuesta Unificada"]
+    R2 --> MERGE
+    R3 --> MERGE
+
+    style AGG fill:#bd93f9,color:#fff
+    style MERGE fill:#50fa7b,color:#000
+```
+:::
+:::
+
+::: { .column width="30%"}
+
+| Ventaja | Desventaja |
+|---------|------------|
+| Simple de implementar | Latencia = suma de todas las llamadas |
+| No requiere infraestructura extra | El agregador puede ser un **bottleneck** |
+| Consistencia en tiempo real | Falla si algún servicio no responde |
+
+::: {.callout-note}
+La **consistencia eventual** reemplaza las transacciones ACID en microservicios.
+:::
+:::
+:::
+
+
+
+# Event-Driven Architecture (EDA)
+
+Arquitectura donde los componentes se comunican a través de **eventos** de forma asíncrona y desacoplada.
+
+---
+
+## ¿Qué es EDA? {.smaller}
+
+```{mermaid}
+graph LR
+    subgraph "Producers"
+        P1[Order Service]
+        P2[Inventory Service]
+    end
+    
+    subgraph "Event Broker (Kafka)"
+        T1[Topic: orders]
+        T2[Topic: inventory]
+        T3[Topic: notifications]
+    end
+    
+    subgraph "Consumers"
+        C1[Inventory Service]
+        C2[Notification Service]
+        C3[Analytics Service]
+    end
+    
+    P1 -->|OrderCreated| T1
+    P2 -->|StockUpdated| T2
+    
+    T1 --> C1
+    T1 --> C3
+    T2 --> C2
+    T2 --> C3
+
+    style T1 fill:#ff79c6,color:#fff
+    style T2 fill:#ff79c6,color:#fff
+    style T3 fill:#ff79c6,color:#fff
+```
+
+::: {.callout-note}
+**EDA** = Los servicios reaccionan a **hechos que ocurrieron** (eventos), no a comandos directos.
+:::
+
+---
+
+## Componentes de EDA {.smaller}
+
+| Componente | Rol | Ejemplo |
+|------------|-----|---------|
+| **Producer** | Emite eventos cuando algo ocurre | Order Service publica `OrderCreated` |
+| **Consumer** | Reacciona a eventos de interés | Inventory Service escucha `OrderCreated` |
+| **Broker** | Canal que transporta eventos | Apache Kafka, RabbitMQ, AWS SQS |
+| **Topic/Queue** | Categoría del evento | `orders`, `inventory`, `notifications` |
+| **Event** | Hecho inmutable que ocurrió | `{ "type": "ProductCreated", "sku": "A-123" }` |
+
+---
+
+## Domain Events vs Integration Events {.smaller}
+
+::: columns
+::: {.column width="50%" style="padding-right: 5%;"}
+**Domain Events**
+
+Ocurren **dentro** de un Bounded Context.
+
+```java
+// Dentro del servicio de inventario
+record StockDecremented(
+    String sku,
+    int quantity,
+    int remainingStock,
+    Instant timestamp
+) {}
+```
+
+- Lenguaje del dominio
+- Usados internamente
+- Pueden ser muy detallados
+:::
+
+::: {.column width="45%"}
+**Integration Events**
+
+Se publican **hacia afuera** para otros servicios.
+
+```java
+// Publicado a Kafka
+record ProductCreatedEvent(
+    String eventId,
+    String eventType,
+    ProductPayload payload,
+    Instant timestamp
+) {}
+```
+
+- Contrato público
+- Versionables
+- Mínimo de información necesaria
+:::
+:::
+
+---
+
+## Eventos en el Caso Arka {.smaller}
+
+::: { .columns }
+::: {.column width="60%"}
+::: { style="transform: scale(1.001); transform-origin: top left;"}
+```{mermaid}
+graph TB
+    subgraph "Flujo de Eventos en Arka"
+        E1["ProductCreated"] --> K[Kafka]
+        E2["StockDecremented"] --> K
+        E3["OrderCreated"] --> K
+        E4["StockReserved"] --> K
+        E5["PaymentProcessed"] --> K
+        E6["OrderShipped"] --> K
+        
+        K --> W[Warehouse Service]
+        K --> N[Notification Service]
+        K --> A[Analytics Service]
+    end
+
+    style K fill:#ff79c6,color:#fff
+    style E1 fill:#50fa7b,color:#000
+    style E2 fill:#ffb86c,color:#000
+    style E3 fill:#8be9fd,color:#000
+    style E4 fill:#50fa7b,color:#000
+    style E5 fill:#bd93f9,color:#fff
+    style E6 fill:#f1fa8c,color:#000
+```
+:::
+:::
+::: {.column width="40%"}
+```json
+{
+  "eventId": "uuid-123",
+  "eventType": "ProductCreated",
+  "payload": {
+    "sku": "GPU-RTX4090",
+    "name": "NVIDIA RTX 4090",
+    "initialStock": 50,
+    "price": 1599.99
+  },
+  "timestamp": "2025-02-15T10:00:00Z"
+}
+```
+:::
+:::
+
+---
+
+## Event Sourcing {.smaller}
+
+Con CRUD, un `UPDATE` **destruye el estado anterior**. **Event Sourcing** cambia el enfoque: guardamos **todos los eventos** que produjeron el estado actual.
+
+::: { style="transform: scale(0.9); transform-origin: top left;"}
+::: { .columns }
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    subgraph "Tradicional - CRUD"
+        DB1["Product: { stock: 47 }"]
+    end
+
+    style DB1 fill:#ff5555,color:#fff
+```
+:::
+::: {.column width="50%"}
+```{mermaid}
+graph LR
+    
+    subgraph "Event Sourcing"
+        E1["ProductCreated(stock=50)"] --> E2["StockDecremented(qty=2)"]
+        E2 --> E3["StockDecremented(qty=1)"]
+        E3 --> STATE["Replay → stock: 47"]
+    end
+
+    style STATE fill:#50fa7b,color:#000
+    style E1 fill:#8be9fd,color:#000
+    style E2 fill:#ffb86c,color:#000
+    style E3 fill:#ffb86c,color:#000
+```
+:::
+:::
+:::
+
+---
+
+## Ventajas de Event Sourcing {.smaller}
+
+| Ventaja | Descripción |
+|---------|-------------|
+| **Auditoría completa** | Historial de cada cambio |
+| **Debugging** | Puedes "rebobinar" al estado en cualquier punto |
+| **Reconstrucción** | Recalcular vistas desde los eventos |
+| **Temporal queries** | "¿Cuál era el stock el martes?" |
+
+::: {.callout-note}
+**Complejidad**: Requiere manejo de snapshots y versionado de eventos.
+:::
+
+---
+
+## CQRS: Command Query Responsibility Segregation {.smaller}
+
+Separar el modelo de **escritura** (Commands) del modelo de **lectura** (Queries).
+
+::: { style="transform: scale(0.95); transform-origin: top left;"}
+```{mermaid}
+graph LR
+    subgraph "Command Side - Write"
+        CMD[Commands] --> CS[Command Handler]
+        CS --> WDB[(Write DB)]
+        CS --> EV[Publicar Evento]
+    end
+    
+    EV --> KAFKA[Kafka]
+    
+    subgraph "Query Side - Read"
+        KAFKA --> PROJ[Projector]
+        PROJ --> RDB[(Read DB)]
+        Q[Queries] --> QH[Query Handler]
+        QH --> RDB
+    end
+
+    style WDB fill:#ffb86c,color:#000
+    style RDB fill:#50fa7b,color:#000
+    style KAFKA fill:#ff79c6,color:#fff
+```
+:::
+
+## ¿Por qué CQRS? {.smaller}
+
+::: columns
+::: {.column width="50%" style="padding-right: 5%;"}
+**El problema sin CQRS**
+
+Un solo modelo para leer y escribir genera conflictos:
+
+- Escritura necesita **normalización** (evitar duplicados)
+- Lectura necesita **desnormalización** (JOINs son lentos)
+- Escalar lectura y escritura juntas es ineficiente
+:::
+
+::: {.column width="40%"}
+**Con CQRS en Arka**
+
+| Lado | BD | Optimización |
+|------|-----|-------------|
+| **Write** | PostgreSQL (R2DBC) | Normalizada, consistente |
+| **Read** | Vista materializada | Desnormalizada, rápida |
+
+Los eventos en Kafka alimentan el modelo de lectura automáticamente.
+:::
+:::
+
+::: {.callout-tip}
+La BD de lectura puede ser una vista desnormalizada, un cache **Redis**, o un índice **Elasticsearch** — cada una optimizada para su caso de uso.
+:::
+
+# Patrón Saga
+
+Transacciones distribuidas en el mundo de los microservicios.
+
+---
+
+## El Problema: Transacciones Distribuidas {.smaller}
+
+En un monolito, una transacción ACID es simple:
+
+- **A**tomicidad: Se ejecuta todo o nada.
+- **C**onsistencia: Los datos pasan de un estado válido a otro.
+- **I**solation (Aislamiento): Las transacciones concurrentes no interfieren entre sí.
+- **D**urabilidad: Una vez confirmada, la transacción persiste incluso ante fallos.
+
+```java
+@Transactional
+public void processOrder(Order order) {
+    orderRepository.save(order);          // 1. Guardar orden
+    inventoryService.decrementStock(sku); // 2. Descontar stock
+    paymentService.charge(order);         // 3. Cobrar
+    // Si algo falla → ROLLBACK automático
+}
+```
+
+
+## El Desafío en Microservicios {.smaller}
+
+**En microservicios**, cada servicio tiene su propia BD:
+
+```{mermaid}
+graph LR
+    OS[Order Service] -->|"save()"| DB1[(Orders DB)]
+    IS[Inventory Service] -->|"decrement()"| DB2[(Inventory DB)]
+    PS[Payment Service] -->|"charge()"| DB3[(Payments DB)]
+    
+    style DB1 fill:#50fa7b,color:#000
+    style DB2 fill:#50fa7b,color:#000
+    style DB3 fill:#ff5555,color:#fff
+```
+
+::: {.callout-warning}
+**No existe `@Transactional` entre bases de datos distintas.** Si el pago falla después de descontar stock, ¿cómo se revierte?
+:::
+
+---
+
+## ¿Qué es el Patrón Saga? {.smaller}
+
+Una **Saga** es una secuencia de **transacciones locales**, donde cada paso tiene una **acción compensatoria** en caso de fallo.
+
+```{mermaid}
+graph LR
+    T1["T1: Crear Orden"] --> T2["T2: Reservar Stock"]
+    T2 --> T3["T3: Procesar Pago"]
+    T3 --> SUCCESS["✅ Saga Completa"]
+    
+    T3 -.->|Fallo| C2["C2: Liberar Stock"]
+    C2 -.-> C1["C1: Cancelar Orden"]
+    C1 -.-> FAIL["❌ Saga Compensada"]
+
+    style SUCCESS fill:#50fa7b,color:#000
+    style FAIL fill:#ff5555,color:#fff
+    style T1 fill:#8be9fd,color:#000
+    style T2 fill:#8be9fd,color:#000
+    style T3 fill:#8be9fd,color:#000
+    style C1 fill:#ffb86c,color:#000
+    style C2 fill:#ffb86c,color:#000
+```
+
+| Concepto | Descripción |
+|----------|-------------|
+| **Transacción Local (T)** | Acción que modifica datos en un servicio |
+| **Compensación (C)** | Acción que revierte una transacción local |
+| **Saga** | Secuencia: T1 → T2 → T3... o C3 → C2 → C1 |
+
+---
+
+## Saga Coreografiada {.smaller}
+
+Cada servicio **emite un evento** y los demás **reaccionan**. No hay un coordinador central.
+
+```{mermaid}
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+sequenceDiagram
+    participant OS as Order Service
+    participant K as Kafka
+    participant IS as Inventory Service
+    participant PS as Payment Service
+
+    OS->>K: OrderCreated (PENDING)
+    K-->>IS: OrderCreated
+    IS->>K: StockReserved ✅
+    K-->>PS: StockReserved
+    PS->>K: PaymentProcessed ✅
+    K-->>OS: PaymentProcessed → CONFIRMED
+```
+
+---
+
+## Coreografía: Caso de Fallo {.smaller}
+
+::: { style="transform: scale(0.90); transform-origin: top left;"}
+¿Qué pasa si el **pago falla**?
+
+```{mermaid}
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '12px'}}}%%
+sequenceDiagram
+    participant OS as Order Service
+    participant K as Kafka
+    participant IS as Inventory Service
+    participant PS as Payment Service
+
+    OS->>K: OrderCreated (PENDING)
+    K-->>IS: OrderCreated
+    IS->>K: StockReserved ✅
+    K-->>PS: StockReserved
+    PS->>K: PaymentFailed ❌
+
+    rect rgb(255, 85, 85)
+        Note over IS,OS: Compensaciones
+        K-->>IS: PaymentFailed → Liberar Stock
+        IS->>K: StockReleased
+        K-->>OS: StockReleased → CANCELLED
+    end
+```
+:::
+
+---
+
+## Saga Orquestada {.smaller}
+
+Es un **microservicio dedicado** (o componente dentro del Order Service) que actúa como "director de orquesta":
+
+- **Conoce** todos los pasos de la transacción
+- **Llama** a cada servicio en orden
+- **Decide** qué compensar si algo falla
+- Los demás servicios **no se conocen entre sí** — solo responden al orquestador
+
+::: {.callout-note}
+A diferencia de la coreografía, aquí hay un **punto central de control**. Más fácil de entender y debuggear, pero introduce más acoplamiento.
+:::
+
+---
+
+## Saga Orquestada: Flujo {.smaller}
+
+```{mermaid}
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '14px'}}}%%
+sequenceDiagram
+    participant ORC as Saga Orchestrator
+    participant OS as Order Service
+    participant IS as Inventory Service
+    participant PS as Payment Service
+
+    ORC->>OS: Crear Orden
+    OS-->>ORC: Orden Creada ✅
+    ORC->>IS: Reservar Stock
+    IS-->>ORC: Stock Reservado ✅
+    ORC->>PS: Procesar Pago
+    PS-->>ORC: Pago Procesado ✅
+    ORC->>OS: Confirmar Orden
+    Note over ORC: Saga Completa
+```
+
+---
+
+## Orquestación: Caso de Fallo {.smaller}
+
+::: columns
+::: {.column width="50%"}
+```{mermaid}
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+sequenceDiagram
+    participant ORC as Saga Orchestrator
+    participant OS as Order Service
+    participant IS as Inventory Service
+    participant PS as Payment Service
+
+    ORC->>OS: Crear Orden
+    OS-->>ORC: Orden Creada ✅
+    ORC->>IS: Reservar Stock
+    IS-->>ORC: Stock Reservado ✅
+    ORC->>PS: Procesar Pago
+    PS-->>ORC: Pago Fallido ❌
+
+    rect rgb(255, 85, 85)
+        Note over ORC: Compensaciones
+        ORC->>IS: Liberar Stock
+        IS-->>ORC: Stock Liberado ✅
+        ORC->>OS: Cancelar Orden
+        OS-->>ORC: Orden Cancelada ✅
+    end
+```
+:::
+
+::: {.callout-note}
+El orquestador mantiene el **estado de la saga** y sabe exactamente qué pasos compensar.
+:::
+:::
+
+---
+
+## Coreografía vs Orquestación {.smaller}
+
+| Aspecto | Coreografía | Orquestación |
+|---------|-------------|--------------|
+| **Coordinador** | No hay (descentralizado) | Sí (orquestador central) |
+| **Acoplamiento** | Bajo (solo eventos) | Medio (orquestador conoce los pasos) |
+| **Complejidad** | Crece con más servicios | Centralizada y manejable |
+| **Visibilidad** | Difícil de rastrear flujo completo | Fácil, el orquestador tiene el estado |
+| **Punto de fallo** | Distribuido | Si cae el orquestador, se detiene |
+| **Ideal para** | Sagas simples (2-3 pasos) | Sagas complejas (4+ pasos) |
+| **Testing** | Más difícil | Más fácil |
+
+
+---
+
+## Saga Arka {.smaller}
+
+::: {.columns}
+::: {.column width="50%"}
+```{mermaid}
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+graph TB
+    OS["Order Service"] -->|OrderCreated| T1([order-created])
+    T1 --> IS["Inventory Service"]
+    IS -->|StockReserved| T2([stock-reserved])
+    T2 --> PS["Payment Service"]
+    PS -->|PaymentProcessed| T3([payment-processed])
+    T3 -->|CONFIRMED| OS
+
+    style T1 fill:#ff79c6,color:#fff
+    style T2 fill:#ff79c6,color:#fff
+    style T3 fill:#50fa7b,color:#000
+    style OS fill:#bd93f9,color:#fff
+    style IS fill:#8be9fd,color:#000
+    style PS fill:#8be9fd,color:#000
+```
+:::
+
+::: {.column width="50%"}
+::: {style="transform: scale(0.75); transform-origin: top left;"}
+```{mermaid}
+%%| fig-height: 4
+%%| font-size: 10px
+graph TB
+    OS["Order Service"] -->|OrderCreated| T1([order-created])
+    T1 --> IS["Inventory Service"]
+    IS -->|StockReserved| T2([stock-reserved])
+    T2 --> PS["Payment Service"]
+    PS -->|PaymentFailed| T4([payment-failed])
+    T4 --> IS2["Inventory Service"]
+    IS2 -->|StockReleased| T5([stock-released])
+    T5 -->|CANCELLED| OS
+
+    style T1 fill:#ff79c6,color:#fff
+    style T2 fill:#ff79c6,color:#fff
+    style T4 fill:#ff5555,color:#fff
+    style T5 fill:#ffb86c,color:#000
+    style OS fill:#bd93f9,color:#fff
+    style IS fill:#8be9fd,color:#000
+    style IS2 fill:#8be9fd,color:#000
+    style PS fill:#8be9fd,color:#000
+```
+:::
+:::
+:::
+
+---
+
+## Estados de la Orden en la Saga {.smaller}
+
+::: {.columns}
+::: {.column width="50%"}
+```{mermaid}
+stateDiagram-v2
+    [*] --> PENDING: Orden Creada
+    PENDING --> STOCK_RESERVED: Stock Reservado
+    STOCK_RESERVED --> CONFIRMED: Pago Procesado ✅
+    STOCK_RESERVED --> STOCK_RELEASED: Pago Falló ❌
+    STOCK_RELEASED --> CANCELLED: Stock Liberado
+    CONFIRMED --> [*]
+    CANCELLED --> [*]
+```
+:::
+
+::: {.column width="50%"}
+
+```java
+public enum OrderStatus {
+    PENDING,           // Orden creada, esperando reserva de stock
+    STOCK_RESERVED,    // Stock reservado, esperando pago
+    CONFIRMED,         // Pago exitoso → Saga completa ✅
+    STOCK_RELEASED,    // Compensación: stock liberado
+    CANCELLED          // Orden cancelada → Saga compensada ❌
+}
+```
+:::
+:::
+---
+
+## Implementación Reactiva de la Saga {.smaller}
+
+```java
+// Inventory Service - Consumer
+@KafkaListener(topics = "order-created")
+public Mono<Void> onOrderCreated(OrderCreatedEvent event) {
+    return inventoryRepository.findBySku(event.sku())
+        .flatMap(product -> {
+            if (product.getStock() >= event.quantity()) {
+                product.setStock(product.getStock() - event.quantity());
+                return inventoryRepository.save(product)
+                    .then(kafkaProducer.send("stock-reserved",
+                        new StockReservedEvent(event.orderId(), event.sku())));
+            } else {
+                return kafkaProducer.send("stock-reserve-failed",
+                    new StockReserveFailedEvent(event.orderId(), "Stock insuficiente"));
+            }
+        });
+}
+```
+
+::: {.callout-warning}
+**Idempotencia**: El consumer debe manejar eventos duplicados. Usar `eventId` para detectar si ya se procesó.
+:::
+
+
+
+# Outbox Pattern
+
+Garantizar **consistencia** entre escritura en BD y publicación de eventos.
+
+---
+
+## El Problema: Dual Write {.smaller}
+
+```{mermaid}
+sequenceDiagram
+    participant S as Service
+    participant DB as Database
+    participant K as Kafka
+
+    S->>DB: 1. Guardar en BD ✅
+    S->>K: 2. Publicar Evento ❌ FALLO
+    
+    Note over S,K: 💀 BD actualizada<br/>pero evento NO publicado<br/>= Estado inconsistente
+```
+
+::: {.callout-warning}
+**Dual Write**: Escribir en BD y en Kafka **no es atómico**. Si uno falla sin el otro, quedamos inconsistentes.
+:::
+
+---
+
+## Solución: Transactional Outbox {.smaller}
+
+```{mermaid}
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+sequenceDiagram
+    participant S as Service
+    participant DB as Database
+    participant R as Outbox Relay
+    participant K as Kafka
+
+    rect rgba(18, 23, 24, 1)
+        Note over S,DB: Misma transacción
+        S->>DB: 1. Guardar datos
+        S->>DB: 2. Guardar evento en tabla outbox
+    end
+
+    R->>DB: 3. Polling tabla outbox
+    R->>K: 4. Publicar evento
+    R->>DB: 5. Marcar como publicado
+```
+
+---
+
+## ¿Qué es el Outbox Relay? {.smaller}
+
+**No es un microservicio separado.**
+
+Es un **componente dentro del mismo servicio** — un job en background que corre periódicamente:
+
+- Lee eventos **pendientes** de la tabla `outbox_events`
+- Los **publica** en Kafka
+- Los **marca** como `PUBLISHED`
+
+Puede implementarse de dos formas:
+
+| Enfoque | Cómo funciona | Cuándo usarlo |
+|---------|--------------|---------------|
+| `@Scheduled` | Polling periódico a la BD | Simple, sin dependencias extra |
+| **Debezium** | Lee el WAL de PostgreSQL (CDC) | Alta frecuencia, sin polling |
+
+::: {.callout-tip}
+**Debezium** (Change Data Capture) es más eficiente: reacciona a los cambios en la BD en tiempo real sin hacer queries repetitivas.
+:::
+
+---
+
+## Outbox Relay: Implementación {.smaller}
+
+```java
+@Component
+public class OutboxRelay {
+
+    private final OutboxRepository outboxRepo;
+    private final KafkaProducer kafkaProducer;
+
+    @Scheduled(fixedDelay = 5000) // Corre cada 5 segundos
+    public void relay() {
+        outboxRepo.findByStatus(PENDING)   // Flux<OutboxEvent>
+            .flatMap(event ->
+                kafkaProducer.send(
+                    event.getTopic(),      // ej: "stock-reserved"
+                    event.getPayload()     // JSON del evento
+                )
+                .then(outboxRepo.markAsPublished(event.getId()))
+            )
+            .subscribe();
+    }
+}
+```
+
+::: {.callout-note}
+`findByStatus(PENDING)` devuelve un `Flux` — procesa **todos** los eventos pendientes en paralelo con `flatMap`.
+:::
+
+---
+
+## Tabla Outbox {.smaller}
+
+```sql
+CREATE TABLE outbox_events (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type  VARCHAR(100) NOT NULL,     -- 'ProductCreated'
+    payload     JSONB NOT NULL,            -- El evento serializado
+    topic       VARCHAR(100) NOT NULL,     -- 'product-created'
+    created_at  TIMESTAMP DEFAULT NOW(),
+    published   BOOLEAN DEFAULT FALSE,
+    published_at TIMESTAMP
+);
+```
+
+```java
+// Dentro de la misma transacción
+@Transactional
+public Mono<Product> createProduct(Product product) {
+    return productRepository.save(product)
+        .flatMap(saved -> {
+            OutboxEvent event = new OutboxEvent(
+                "ProductCreated",
+                toJson(new ProductCreatedEvent(saved)),
+                "product-created"
+            );
+            return outboxRepository.save(event)
+                .thenReturn(saved);
+        });
+}
+```
+
+
+# Resumen & Próximos Pasos
+
+---
+
+## Mapa de Patrones {.smaller}
+
+```{mermaid}
+mindmap
+  root((Patrones de<br/>Microservicios))
+    Comunicación
+      API Gateway
+      BFF
+      Service Discovery
+    Resiliencia
+      Circuit Breaker
+      Retry
+      Bulkhead
+    Datos
+      Database per Service
+      CQRS
+      Event Sourcing
+    Transacciones
+      Saga Coreografiada
+      Saga Orquestada
+      Outbox Pattern
+    Eventos
+      EDA
+      Domain Events
+      Integration Events
+```
+
+---
+
+## Resumen de Patrones {.smaller}
+
+| Patrón | Problema que Resuelve | Aplicación en Arka |
+|--------|----------------------|-------------------|
+| **API Gateway** | Punto de entrada único | Gateway para clientes web/mobile |
+| **Service Discovery** | Encontrar servicios dinámicos | Docker Compose DNS |
+| **Circuit Breaker** | Cascading failures | Proteger llamadas a inventario |
+| **Database per Service** | Acoplamiento de datos | Cada servicio con su PostgreSQL |
+| **EDA** | Comunicación acoplada | Kafka como event backbone |
+| **CQRS** | Lecturas vs escrituras | Consultas de catálogo optimizadas |
+| **Saga** | Transacciones distribuidas | Flujo Orden → Stock → Pago |
+| **Outbox** | Dual-write inconsistency | Garantizar publicación de eventos |
+
+---
+
+## Próximo Paso: Lab Práctico - Arka {.smaller}
+
+En el laboratorio implementaremos:
+
+::: {.incremental}
+1. **Inventory Service** con Spring WebFlux + R2DBC
+2. **Order Service** con máquina de estados de la Saga
+3. **Kafka** como message broker para eventos
+4. **Docker Compose** para la infraestructura completa
+5. **Patrón Saga Coreografiada** para el flujo de órdenes
+6. **Outbox Pattern** para garantizar consistencia
+:::
+
+::: {.callout-tip}
+Todo el stack: **Java 17+ / Spring WebFlux / R2DBC / PostgreSQL / Kafka / Docker**
+:::
+
+---
+
+## Recursos {.smaller}
+
+- [Microservices Patterns - Chris Richardson](https://microservices.io/patterns/)
+- [Event-Driven Microservices - O'Reilly](https://www.oreilly.com/library/view/building-event-driven/9781492057888/)
+- [Saga Pattern - Microsoft](https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/saga/saga)
+- [CQRS Journey - Microsoft](https://learn.microsoft.com/en-us/previous-versions/msp-n-p/jj554200(v=pandp.10))
+- [Clean Architecture Plugin - Bancolombia](https://github.com/bancolombia/scaffold-clean-architecture)
+- [Resilience4j Documentation](https://resilience4j.readme.io/)
+- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
