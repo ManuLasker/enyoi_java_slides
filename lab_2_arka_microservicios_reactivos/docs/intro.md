@@ -8,7 +8,7 @@ import TabItem from '@theme/TabItem';
 # Lab Avanzado: Microservicios Reactivos con Arka
 
 :::tip Desafío Técnico — Tiempo estimado
-**Tiempo total:** 8 horas (8 módulos de ~1 hora). Este lab no es un tutorial guiado punto a punto — es una **simulación real** de un ecosistema distribuido en producción.
+**Tiempo total:** 12+ horas (9 módulos). Este lab no es un tutorial guiado punto a punto — es una **simulación real** de un ecosistema distribuido en producción.
 :::
 
 ## El Problema de Arka
@@ -144,11 +144,12 @@ Antes de comenzar, asegúrate de tener instalado:
 | 1 | [Setup: Docker Compose Avanzado](./modulos/01-setup-docker-compose.md) | ~1 hora |
 | 2 | [Kafka: Prueba de Concepto](./modulos/02-kafka-prueba-concepto.md) | ~1 hora |
 | 3 | [IaC: CloudFormation + LocalStack](./modulos/03-iac-cloudformation.md) | ~1 hora |
-| 4 | [Seguridad: AWS Secrets Manager](./modulos/04-seguridad-secrets.md) | ~45 min |
-| 5 | [DDD y Arquitectura Hexagonal](./modulos/05-ddd-arquitectura-hexagonal.md) | ~1 hora |
-| 6 | [Persistencia Reactiva con R2DBC](./modulos/06-persistencia-r2dbc.md) | ~1 hora |
-| 7 | [Mensajería Kafka + SAGA](./modulos/07-saga-coreografia.md) | ~1 hora |
-| 8 | [Escalado, Circuit Breaker y Pruebas E2E](./modulos/08-pruebas-e2e.md) | ~1 hora |
+| 4 | [Seguridad: AWS Secrets Manager](./modulos/04-seguridad-secrets.md) | ~1 hora |
+| 5 | [Microservicio Orders — Scaffold, Docker & API Gateway](./modulos/05-microservicio-orders.md) | ~1 hora |
+| 6 | [ms-orders — Implementación Completa](./modulos/06-ms-orders-implementacion.md) | ~2 horas |
+| 7 | [ms-inventory — Reserva de Stock & Compensación](./modulos/07-ms-inventory-implementacion.md) | ~2 horas |
+| 8 | [ms-payment — Simulador & Circuit Breaker](./modulos/08-ms-payment-implementacion.md) | ~1.5 horas |
+| 9 | [Pruebas E2E, Escalado y Demo Final](./modulos/09-pruebas-e2e.md) | ~1 hora |
 
 ---
 
