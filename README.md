@@ -10,3 +10,5 @@ base_url: https://manulasker.github.io/enyoi_java_slides/
 5. https://manulasker.github.io/enyoi_java_slides/clase_18_19_ddd_eventos_servicios_dominio/
 6. https://manulasker.github.io/enyoi_java_slides/clase_22_23_docker/
 7. https://manulasker.github.io/enyoi_java_slides/lab_1_docker_localstack/
+8. https://manulasker.github.io/enyoi_java_slides/clase_24_25_patrones_arquitectura_microservicios/
+9. https://manulasker.github.io/enyoi_java_slides/lab_2_arka_microservicios_reactivos/

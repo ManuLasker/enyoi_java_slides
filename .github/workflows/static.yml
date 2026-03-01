@@ -37,8 +37,14 @@ jobs:
           version: '1.8.26'
       
       # Build Docusaurus lab
-      - name: Build Docusaurus
+      - name: Build Docusaurus lab docker localstack
         working-directory: lab_1_docker_localstack
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Docusaurus arka microservicios reactivos
+        working-directory: lab_2_arka_microservicios_reactivos
         run: |
           npm ci
           npm run build
