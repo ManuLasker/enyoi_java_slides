@@ -94,8 +94,9 @@ jobs:
             [ -d "$dir" ] && cp -r $dir _site/
           done
 
-          # Copy Docusaurus build
+          # Copy Docusaurus builds
           cp -r lab_1_docker_localstack/build _site/lab_1_docker_localstack
+          cp -r lab_2_arka_microservicios_reactivos/build _site/lab_2_arka_microservicios_reactivos
 
           # Copy root index
           cp index.html _site/
