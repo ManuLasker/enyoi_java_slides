@@ -122,7 +122,7 @@ Esto genera el módulo productor asíncrono usando Reactive Commons para la comu
 ### Paso 6: Generar el Entry Point (Consumidor Kafka)
 
 ```bash
-./gradlew gep --type kafkastrimzi --topic test-events
+./gradlew gep --type kafkastrimzi --topic-consumer test-events
 ```
 
 Esto genera un consumidor Kafka reactivo usando las primitivas de `reactor-kafka`.
