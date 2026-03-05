@@ -1,0 +1,1062 @@
+---
+title: "Repaso — Quiz 4"
+subtitle: "Programación Funcional · BFF · Docker"
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "Repaso Quiz 4 — ENYOI"
+    quiz:
+      shuffleOptions: true
+      defaultCorrect: "✅ ¡Correcto!"
+      defaultIncorrect: "❌ Incorrecto"
+      includeScore: true
+      disableOnCheck: true
+revealjs-plugins:
+  - quiz
+---
+
+# Repaso — Quiz 4
+
+Temas a repasar:
+
+1. **Programación Funcional** en Java
+2. **Backend for Frontend** (BFF)
+3. **Docker** & Docker Compose
+
+::: {.callout-tip}
+**Controles del Quiz**: Presiona `c` para verificar tu respuesta, `q` para reiniciar una pregunta.
+:::
+
+
+
+# Programación Funcional en Java
+
+Escribiendo código **declarativo** con lambdas, Streams y Optional.
+
+---
+
+## Interfaces Funcionales {.smaller}
+
+Una **interfaz funcional** es una interfaz con **un solo método abstracto** (SAM).
+
+| Interfaz | Método | Entrada → Salida | Ejemplo |
+|----------|--------|-------------------|---------|
+| `Function<T,R>` | `apply(T)` | `T → R` | Transformar un objeto |
+| `Predicate<T>` | `test(T)` | `T → boolean` | Filtrar elementos |
+| `Consumer<T>` | `accept(T)` | `T → void` | Imprimir, guardar |
+| `Supplier<T>` | `get()` | `() → T` | Crear objetos |
+| `UnaryOperator<T>` | `apply(T)` | `T → T` | Modificar mismo tipo |
+| `BiFunction<T,U,R>` | `apply(T,U)` | `(T,U) → R` | Combinar dos valores |
+
+```java
+// Ejemplo
+Function<String, Integer> longitud = s -> s.length();
+Predicate<Integer> esPar = n -> n % 2 == 0;
+Consumer<String> imprimir = s -> System.out.println(s);
+Supplier<List<String>> crearLista = ArrayList::new;
+```
+
+---
+
+## Expresiones Lambda {.smaller}
+
+Una **lambda** es una función anónima que implementa una interfaz funcional.
+
+::: columns
+::: {.column width="50%"}
+**Sintaxis completa:**
+```java
+(String nombre) -> {
+    return "Hola " + nombre;
+}
+```
+:::
+
+::: {.column width="50%"}
+**Sintaxis simplificada:**
+```java
+nombre -> "Hola " + nombre
+```
+:::
+:::
+
+```java
+// Lambda vs Clase anónima
+// ANTES (Java 7)
+Collections.sort(lista, new Comparator<String>() {
+    @Override
+    public int compare(String a, String b) {
+        return a.compareTo(b);
+    }
+});
+
+// DESPUÉS (Java 8+)
+lista.sort((a, b) -> a.compareTo(b));
+// O con Method Reference
+lista.sort(String::compareTo);
+```
+
+::: {.callout-note}
+**Method Reference** (`::`) es un atajo para lambdas que simplemente delegan a un método existente.
+:::
+
+---
+
+## Stream API {.smaller}
+
+Un **Stream** es una secuencia de elementos que soporta operaciones de procesamiento declarativas.
+
+```{mermaid}
+graph LR
+    SRC["Fuente<br/>(Collection, Array)"] --> INT["Operaciones Intermedias<br/>filter, map, sorted, distinct"]
+    INT --> TERM["Operación Terminal<br/>collect, forEach, reduce, count"]
+    
+    style SRC fill:#8be9fd,color:#000
+    style INT fill:#ffb86c,color:#000
+    style TERM fill:#50fa7b,color:#000
+```
+
+| Tipo | Operaciones | Característica |
+|------|-------------|----------------|
+| **Intermedias** | `filter`, `map`, `flatMap`, `sorted`, `distinct`, `peek` | Lazy — no ejecutan hasta terminal |
+| **Terminales** | `collect`, `forEach`, `reduce`, `count`, `findFirst`, `anyMatch` | Ejecutan el pipeline |
+
+---
+
+## Stream API — Ejemplos {.smaller}
+
+```java
+List<Product> products = getProducts();
+
+// Filtrar, transformar y recolectar
+List<String> nombresCaros = products.stream()
+    .filter(p -> p.getPrice() > 1000)       // Predicate
+    .map(Product::getName)                    // Function
+    .sorted()                                 // Comparable
+    .collect(Collectors.toList());            // Terminal
+
+// Reducir a un valor
+double totalVentas = products.stream()
+    .mapToDouble(Product::getPrice)
+    .sum();
+
+// Agrupar por categoría
+Map<String, List<Product>> porCategoria = products.stream()
+    .collect(Collectors.groupingBy(Product::getCategory));
+
+// FlatMap: aplanar listas anidadas
+List<String> todasLasTags = products.stream()
+    .flatMap(p -> p.getTags().stream())       // Stream<Stream<String>> → Stream<String>
+    .distinct()
+    .collect(Collectors.toList());
+```
+
+---
+
+## Optional {.smaller}
+
+`Optional<T>` es un contenedor que **puede o no contener un valor**. Evita `NullPointerException`.
+
+::: columns
+::: {.column width="50%"}
+**Sin Optional:**
+```java
+Product p = findById(id);
+if (p != null) {
+    String name = p.getName();
+    if (name != null) {
+        return name.toUpperCase();
+    }
+}
+return "UNKNOWN";
+```
+:::
+
+::: {.column width="50%"}
+**Con Optional:**
+```java
+return findById(id)
+    .map(Product::getName)
+    .map(String::toUpperCase)
+    .orElse("UNKNOWN");
+```
+:::
+:::
+
+| Método | Descripción |
+|--------|-------------|
+| `of(value)` | Crea Optional (lanza si null) |
+| `ofNullable(value)` | Crea Optional (vacío si null) |
+| `isPresent()` | ¿Tiene valor? |
+| `map(Function)` | Transforma el valor si existe |
+| `flatMap(Function)` | Como map, pero la función retorna Optional |
+| `orElse(default)` | Valor por defecto si vacío |
+| `orElseThrow()` | Lanza excepción si vacío |
+
+
+
+# Quiz: Programación Funcional
+
+---
+
+## ¿Cuál interfaz funcional recibe un argumento y retorna un boolean? {.quiz-question}
+
+- `Function<T, Boolean>`{data-explanation="Function<T,R> retorna un tipo R genérico. Aunque podrías usar Boolean, la interfaz específica es Predicate."}
+- [`Predicate<T>`]{.correct data-explanation="Predicate<T> tiene el método test(T) que retorna boolean, diseñada específicamente para condiciones."}
+- `Consumer<T>`{data-explanation="Consumer<T> recibe un argumento pero NO retorna nada (void)."}
+- `Supplier<T>`{data-explanation="Supplier<T> NO recibe argumentos, solo retorna un valor con get()."}
+
+---
+
+## ¿Qué imprime este código? {.quiz-question}
+
+```java
+List<Integer> nums = List.of(1, 2, 3, 4, 5);
+long result = nums.stream()
+    .filter(n -> n % 2 == 0)
+    .count();
+System.out.println(result);
+```
+
+- `5`{data-explanation="5 es el total de elementos, pero filter descarta los impares."}
+- [`2`]{.correct data-explanation="filter(n -> n % 2 == 0) mantiene solo 2 y 4, y count() retorna 2."}
+- `3`{data-explanation="3 serían los impares, pero el filtro selecciona los pares."}
+- `Error de compilación`{data-explanation="El código es válido. count() retorna long."}
+
+---
+
+## ¿Cuál es la diferencia entre `map` y `flatMap` en Streams? {.quiz-question}
+
+- [`map` es para primitivos y `flatMap` para objetos]{data-explanation="Ambos trabajan con objetos. Para primitivos existen mapToInt, mapToDouble, etc."}
+- [`map` transforma 1:1, `flatMap` aplana streams anidados]{.correct data-explanation="map(f) aplica f a cada elemento. flatMap(f) aplica f que retorna un Stream y luego aplana todos los Streams en uno solo."}
+- [Son sinónimos, hacen lo mismo]{data-explanation="No son lo mismo. flatMap es crucial cuando la función de mapeo retorna un Stream o una colección."}
+- [`flatMap` solo funciona con Optional]{data-explanation="flatMap existe tanto en Stream como en Optional, pero con semánticas similares: aplana el resultado."}
+
+---
+
+## ¿Qué retorna este código? {.quiz-question}
+
+```java
+Optional<String> opt = Optional.ofNullable(null);
+String result = opt.orElse("default");
+```
+
+- `null`{data-explanation="orElse() precisamente evita retornar null, proporcionando un valor por defecto."}
+- [`"default"`]{.correct data-explanation="ofNullable(null) crea un Optional vacío, y orElse(\"default\") retorna el valor por defecto cuando está vacío."}
+- `NullPointerException`{data-explanation="Optional.ofNullable() acepta null sin lanzar excepción. Sería Optional.of(null) el que lanza."}
+- `Optional.empty()`{data-explanation="orElse() desenvuelve el Optional y retorna el valor contenido o el default, no otro Optional."}
+
+---
+
+## ¿Cuál operación de Stream es **terminal**? {.quiz-question}
+
+- `filter()`{data-explanation="filter() es una operación INTERMEDIA — retorna un Stream y es lazy."}
+- `map()`{data-explanation="map() es INTERMEDIA — transforma elementos pero retorna un Stream."}
+- `sorted()`{data-explanation="sorted() es INTERMEDIA — ordena pero retorna un Stream."}
+- [`collect()`]{.correct data-explanation="collect() es TERMINAL — ejecuta todo el pipeline y produce un resultado final (List, Map, etc.)."}
+
+---
+
+## ¿Qué tipo de Method Reference es `String::length`? {.quiz-question}
+
+- [`String::length` es una referencia a un constructor]{data-explanation="Una referencia a constructor usa la forma Clase::new, por ejemplo ArrayList::new. String::length invoca un método de instancia."}
+- [`String::length` es una referencia a un método de instancia de un tipo arbitrario]{.correct data-explanation="Cuando usas Clase::metodoInstancia (sin un objeto específico), Java toma el primer parámetro del lambda como el receptor del método. Equivale a (String s) -> s.length()."}
+- [`String::length` es una referencia a un método estático]{data-explanation="Un método estático sería algo como Integer::parseInt. length() no es un método estático de String, es de instancia."}
+- [`String::length` es una referencia a un método de instancia de un objeto particular]{data-explanation="Eso sería si usaras una variable como miString::length. Aquí se usa la clase String, no una instancia específica."}
+
+---
+
+## ¿Qué hace `reduce()` en un Stream? {.quiz-question}
+
+- [Filtra los elementos que cumplen una condición]{data-explanation="Eso lo hace filter(). reduce() combina todos los elementos en un solo resultado usando una función acumuladora."}
+- [Transforma cada elemento del Stream]{data-explanation="Eso lo hace map(). reduce() toma todos los elementos y los combina en un solo valor."}
+- [Combina todos los elementos del Stream en un solo resultado usando una función acumuladora]{.correct data-explanation="reduce() aplica una BinaryOperator repetidamente. Ejemplo: nums.stream().reduce(0, Integer::sum) suma todos los elementos. El primer argumento es el valor identidad y el segundo es la función acumuladora."}
+- [Ordena los elementos del Stream]{data-explanation="Eso lo hace sorted(). reduce() es una operación terminal que acumula los elementos en un solo valor."}
+
+---
+
+## ¿Qué retorna `Collectors.groupingBy()`? {.quiz-question}
+
+- `List<T>`{data-explanation="Collectors.toList() retorna una lista. groupingBy() retorna un Map donde cada key agrupa una lista de elementos."}
+- `Set<T>`{data-explanation="Collectors.toSet() retorna un Set. groupingBy() agrupa elementos por una clave y retorna un Map."}
+- [`Map<K, List<T>>`]{.correct data-explanation="groupingBy(classifier) crea un Map donde las keys son el resultado del classifier y los values son listas de elementos que comparten esa clave. Ejemplo: personas.stream().collect(Collectors.groupingBy(Persona::getCiudad)) retorna Map<String, List<Persona>>."}
+- `Optional<T>`{data-explanation="Optional envuelve un solo valor. groupingBy() retorna un Map con múltiples grupos de elementos."}
+
+---
+
+## ¿Cuál es la diferencia entre `peek()` y `forEach()`? {.quiz-question}
+
+- [Hacen exactamente lo mismo, son sinónimos]{data-explanation="No son lo mismo. La diferencia clave es que peek() es INTERMEDIA (retorna un Stream, es lazy) y forEach() es TERMINAL (ejecuta el pipeline y no retorna Stream)."}
+- [`peek()` es intermedia y retorna un Stream; `forEach()` es terminal y no retorna nada]{.correct data-explanation="peek() es útil para debugging: te permite ver los elementos SIN interrumpir el pipeline. forEach() es terminal y consume el Stream. Ejemplo: stream.peek(System.out::println).filter(...).collect(...) imprime cada elemento antes de filtrar."}
+- [`forEach()` es intermedia y `peek()` es terminal]{data-explanation="Es al revés. peek() retorna un Stream (intermedia) y forEach() consume el Stream (terminal) retornando void."}
+- [`peek()` modifica los elementos y `forEach()` solo los lee]{data-explanation="Ninguna de las dos debería modificar los elementos. Ambas reciben un Consumer<T>, pero peek() es intermedia y forEach() es terminal."}
+
+---
+
+## ¿Qué pasa si usas un Stream después de una operación terminal? {.quiz-question}
+
+- [El Stream se reinicia y puedes reutilizarlo]{data-explanation="Los Streams en Java NO son reutilizables. Una vez consumidos por una operación terminal, se cierran permanentemente."}
+- [No pasa nada, puedes seguir usándolo]{data-explanation="Incorrecto. Un Stream consumido lanza una excepción al intentar reutilizarlo."}
+- [Se lanza `IllegalStateException` porque el Stream ya fue consumido]{.correct data-explanation="Los Streams son de un solo uso. Después de una operación terminal (collect, forEach, reduce, etc.), el Stream se cierra. Intentar otra operación lanza IllegalStateException: 'stream has already been operated upon or closed'. Si necesitas múltiples operaciones, crea un nuevo Stream desde la fuente."}
+- [Se crea automáticamente un nuevo Stream]{data-explanation="Java no crea Streams automáticamente. Debes crear uno nuevo explícitamente desde la colección fuente."}
+
+---
+
+## ¿Qué diferencia hay entre `Optional.map()` y `Optional.flatMap()`? {.quiz-question}
+
+- [No hay diferencia, hacen lo mismo]{data-explanation="Sí hay diferencia. map() envuelve el resultado en un Optional adicional si la función ya retorna Optional, causando Optional<Optional<T>>. flatMap() aplana esa estructura."}
+- [`map()` lanza excepción si el Optional está vacío; `flatMap()` no]{data-explanation="Ninguno de los dos lanza excepción con Optional vacío. Ambos simplemente retornan Optional.empty() si el valor no existe."}
+- [`map()` envuelve el resultado en Optional; `flatMap()` espera que la función ya retorne Optional y aplana el resultado]{.correct data-explanation="map(f) aplica f y envuelve en Optional: Optional<R>. Si f retorna Optional<R>, obtienes Optional<Optional<R>>. flatMap(f) espera que f retorne Optional<R> directamente y NO lo envuelve de nuevo. Ejemplo: findUser(id).flatMap(User::getAddress) donde getAddress() retorna Optional<Address>."}
+- [`flatMap()` solo funciona con listas dentro del Optional]{data-explanation="flatMap() de Optional funciona con cualquier tipo, no solo listas. Lo importante es que la función que recibe debe retornar un Optional."}
+
+---
+
+## ¿Qué es una variable 'effectively final' en el contexto de lambdas? {.quiz-question}
+
+- [Una variable declarada como `final` explícitamente]{data-explanation="Una variable 'effectively final' NO necesita la keyword final. Es una variable que NUNCA se reasigna después de su inicialización, aunque no tenga el modificador final."}
+- [Una variable que puede cambiar su valor dentro de la lambda]{data-explanation="Las lambdas NO pueden modificar variables locales del scope externo. Solo pueden leer variables que sean final o effectively final."}
+- [Una variable que no se reasigna después de su inicialización, aunque no tenga el modificador final]{.correct data-explanation="Java 8+ permite que las lambdas capturen variables locales que no estén declaradas final pero que nunca se reasignen. Ejemplo: String nombre = 'Juan'; Runnable r = () -> System.out.println(nombre); // OK, nombre es effectively final. Si luego hicieras nombre = 'Maria', el compilador daría error en la lambda."}
+- [Una variable estática de la clase]{data-explanation="Las variables estáticas no necesitan ser effectively final para ser usadas en lambdas. La restricción aplica solo a variables locales del método."}
+
+---
+
+## ¿Qué interfaz funcional recibe DOS argumentos y retorna un resultado? {.quiz-question}
+
+- `Function<T,R>`{data-explanation="Function<T,R> recibe UN solo argumento de tipo T y retorna R. Para dos argumentos necesitas BiFunction."}
+- `UnaryOperator<T>`{data-explanation="UnaryOperator<T> recibe UN argumento y retorna el mismo tipo T. Es un caso especial de Function<T,T>."}
+- [`BiFunction<T,U,R>`]{.correct data-explanation="BiFunction<T,U,R> recibe dos argumentos (T y U) y retorna un resultado R con su método apply(T, U). Ejemplo: BiFunction<String, Integer, String> repetir = (s, n) -> s.repeat(n); repetir.apply('Hola', 3) retorna 'HolaHolaHola'."}
+- `BinaryOperator<T>`{data-explanation="BinaryOperator<T> sí recibe dos argumentos, pero ambos del MISMO tipo T y retorna T. Es un caso especial de BiFunction<T,T,T>. BiFunction es la respuesta más general."}
+
+---
+
+## ¿Cuál es la diferencia entre `findFirst()` y `findAny()` en Streams? {.quiz-question}
+
+- [Son idénticos, siempre retornan el mismo resultado]{data-explanation="En streams secuenciales suelen retornar lo mismo, pero en streams paralelos findAny() puede retornar cualquier elemento del Stream, no necesariamente el primero."}
+- [`findFirst()` retorna el primer elemento en orden; `findAny()` puede retornar cualquier elemento, útil en streams paralelos]{.correct data-explanation="findFirst() garantiza retornar el primer elemento del Stream según su orden de encuentro. findAny() no da garantías de orden y es más eficiente en streams paralelos porque no necesita sincronización. Ambos retornan Optional<T>. En streams secuenciales, findAny() generalmente también retorna el primero."}
+- [`findFirst()` lanza excepción si el Stream está vacío; `findAny()` retorna null]{data-explanation="Ninguno lanza excepción ni retorna null. Ambos retornan Optional.empty() si el Stream está vacío."}
+- [`findAny()` retorna todos los elementos; `findFirst()` solo uno]{data-explanation="Ambos retornan un solo elemento embebido en Optional<T>. Para obtener todos los elementos, usas collect(Collectors.toList())."}
+
+---
+
+## ¿Qué hace `Collectors.toMap(keyMapper, valueMapper)`? {.quiz-question}
+
+- [Agrupa elementos por clave en listas]{data-explanation="Eso lo hace Collectors.groupingBy(). toMap() crea un Map con exactamente un valor por clave. Si hay claves duplicadas, lanza IllegalStateException."}
+- [Crea un Map donde cada elemento se convierte en una entrada clave-valor]{.correct data-explanation="toMap(keyMapper, valueMapper) transforma cada elemento del Stream en una entrada del Map. Ejemplo: personas.stream().collect(Collectors.toMap(Persona::getId, Persona::getNombre)) crea un Map<Long, String>. Importante: si hay claves duplicadas, lanza excepción. Para manejar duplicados, usa la variante con merge function: toMap(key, value, (v1, v2) -> v1)."}
+- [Convierte un Map existente en un Stream]{data-explanation="Para convertir un Map a Stream usas map.entrySet().stream(). toMap() hace lo contrario: convierte un Stream en un Map."}
+- [Ordena los elementos y los pone en un TreeMap]{data-explanation="toMap() no ordena y crea un HashMap por defecto. Si quieres un TreeMap, usa la variante: toMap(key, value, mergeFunction, TreeMap::new)."}
+
+
+
+# Backend for Frontend (BFF)
+
+Optimizando la comunicación entre clientes y microservicios.
+
+---
+
+## API Gateway — Repaso {.smaller}
+
+Un **API Gateway** es un punto de entrada único para todos los clientes.
+
+```{mermaid}
+graph TB
+    WEB[Web App] --> GW
+    MOB[Mobile App] --> GW
+    EXT[Third Party] --> GW
+    
+    subgraph "API Gateway"
+        GW[Gateway]
+        AUTH[Auth]
+        RL[Rate Limiting]
+        CACHE[Cache]
+    end
+    
+    GW --> S1[Product Service]
+    GW --> S2[Order Service]
+    GW --> S3[Inventory Service]
+
+    style GW fill:#bd93f9,color:#fff
+    style AUTH fill:#50fa7b,color:#000
+    style RL fill:#ffb86c,color:#000
+    style CACHE fill:#8be9fd,color:#000
+```
+
+**Responsabilidades**: Routing, Auth, Rate Limiting, Load Balancing, Circuit Breaking.
+
+---
+
+## ¿Qué es BFF? {.smaller}
+
+**Backend for Frontend**: variante del API Gateway donde **cada tipo de cliente** tiene su propio backend optimizado.
+
+```{mermaid}
+graph TB
+    WEB["Web App"] --> BFF_WEB["BFF Web<br/>(datos ricos, paginación)"]
+    MOB["Mobile App"] --> BFF_MOB["BFF Mobile<br/>(datos mínimos, offline)"]
+    IOT["IoT"] --> BFF_IOT["BFF IoT<br/>(comandos simples)"]
+    
+    BFF_WEB --> S1[Product Service]
+    BFF_WEB --> S2[Order Service]
+    BFF_MOB --> S1
+    BFF_MOB --> S3[Inventory Service]
+    BFF_IOT --> S3
+
+    style BFF_WEB fill:#bd93f9,color:#fff
+    style BFF_MOB fill:#ff79c6,color:#fff
+    style BFF_IOT fill:#ffb86c,color:#000
+```
+
+::: {.callout-tip}
+Cada BFF adapta las respuestas a las necesidades de su cliente: la **web** recibe más datos, el **móvil** recibe payloads más ligeros.
+:::
+
+---
+
+## API Gateway vs BFF {.smaller}
+
+| Característica | API Gateway | BFF |
+|---|---|---|
+| **Enfoque** | Único punto de entrada | Múltiples gateways por cliente |
+| **Adaptabilidad** | "Talla única" | A medida para cada cliente |
+| **Propiedad** | Equipo de Plataforma | Equipo de Frontend/Producto |
+| **Ventaja** | Simplicidad y centralización | Optimización de UX y performance |
+| **Riesgo** | Cuello de botella | Duplicación de lógica |
+| **Evolución** | Evoluciona de forma centralizada | Cada BFF evoluciona independiente |
+
+::: {.callout-note}
+El BFF **no reemplaza** al API Gateway; a menudo **coexisten**. El Gateway maneja cross-cutting concerns (SSL, Auth) y enruta a los BFFs.
+:::
+
+---
+
+## ¿Cuándo usar BFF? {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**SÍ usar BFF cuando:**
+
+- Múltiples tipos de clientes con necesidades muy diferentes
+- El equipo de frontend necesita autonomía
+- Se requiere optimizar payloads por plataforma
+- La web necesita SSR y el móvil REST simple
+:::
+
+::: {.column width="50%"}
+**NO usar BFF cuando:**
+
+- Solo tienes un tipo de cliente
+- Los clientes consumen datos similares
+- Equipo pequeño (overhead de mantener N backends)
+- No tienes suficiente complejidad en la capa de API
+:::
+:::
+
+
+
+# Quiz: BFF
+
+---
+
+## ¿Qué significa BFF en el contexto de microservicios? {.quiz-question}
+
+- [Best Friend Forever]{data-explanation="😄 En microservicios, BFF tiene un significado técnico diferente."}
+- [Backend for Frontend]{.correct data-explanation="BFF = Backend for Frontend. Es un patrón donde cada tipo de cliente tiene su propio backend optimizado."}
+- [Backend Full Framework]{data-explanation="No es un framework, es un patrón de arquitectura."}
+- [Browser First Framework]{data-explanation="BFF no está limitado a browsers, también aplica para mobile, IoT, etc."}
+
+---
+
+## ¿Cuál es la principal ventaja del BFF sobre un API Gateway único? {.quiz-question}
+
+- [Es más fácil de implementar]{data-explanation="En realidad, BFF agrega complejidad al tener múltiples backends que mantener."}
+- [Consume menos recursos del servidor]{data-explanation="BFF puede consumir MÁS recursos al tener múltiples backends, pero la ventaja es en UX."}
+- [Optimiza las respuestas para cada tipo de cliente]{.correct data-explanation="La principal ventaja del BFF es que cada backend puede adaptar el formato, tamaño y estructura de los datos según las necesidades de su cliente específico."}
+- [Reemplaza totalmente al API Gateway]{data-explanation="El BFF NO reemplaza al API Gateway. Normalmente coexisten: el Gateway maneja Auth/SSL y enruta a los BFFs."}
+
+---
+
+## ¿Quién típicamente es responsable (owner) de un BFF? {.quiz-question}
+
+- [El equipo de DevOps]{data-explanation="DevOps gestiona infraestructura, no la lógica de presentación del BFF."}
+- [El equipo de Base de Datos]{data-explanation="El BFF no gestiona datos directamente, consume servicios downstream."}
+- [El equipo de Frontend/Producto]{.correct data-explanation="El BFF es propiedad del equipo de frontend porque ellos conocen las necesidades específicas de su cliente y pueden evolucionar el BFF independientemente."}
+- [El equipo de Seguridad]{data-explanation="Seguridad es un cross-cutting concern que maneja el API Gateway, no el BFF."}
+
+---
+
+## ¿Cuándo NO es recomendable usar el patrón BFF? {.quiz-question}
+
+- [Cuando tienes clientes web y mobile con necesidades muy diferentes]{data-explanation="Ese es precisamente el caso ideal PARA usar BFF."}
+- [Cuando el equipo de frontend necesita autonomía]{data-explanation="Ese es otro caso ideal PARA usar BFF: les da independencia."}
+- [Cuando solo tienes un tipo de cliente y un equipo pequeño]{.correct data-explanation="Si solo hay un tipo de cliente, un API Gateway único es suficiente. BFF agrega overhead innecesario con equipos pequeños."}
+- [Cuando necesitas optimizar el payload para dispositivos móviles]{data-explanation="Optimizar payloads por plataforma es justamente el caso de uso principal de BFF."}
+
+---
+
+## Si ya tengo un API Gateway, necesito quitar el Gateway para usar BFF? {.quiz-question}
+
+- [Si, el BFF reemplaza completamente al API Gateway]{data-explanation="El BFF NO reemplaza al Gateway. Ambos cumplen funciones diferentes y complementarias."}
+- [No, pero el BFF debe ir ANTES del API Gateway]{data-explanation="El orden es al revés. El API Gateway va primero (maneja SSL, Auth, rate limiting) y luego enruta a los BFFs."}
+- [No, BFF y API Gateway coexisten; el Gateway maneja cross-cutting concerns y enruta a los BFFs]{.correct data-explanation="El patrón recomendado es: Cliente -> API Gateway (SSL, Auth, Rate Limiting) -> BFF (adapta datos para el cliente) -> Microservicios downstream. El Gateway maneja preocupaciones transversales y el BFF se enfoca en la experiencia del cliente."}
+- [Si, tener ambos causa conflictos de routing]{data-explanation="No hay conflictos. El Gateway actúa como puerta de entrada y el BFF como adaptador de datos especializado por cliente."}
+
+---
+
+## Como se comunica un BFF con los microservicios downstream? {.quiz-question}
+
+- [Solo mediante bases de datos compartidas]{data-explanation="Compartir bases de datos entre BFF y microservicios viola el principio de independencia de datos en microservicios. Cada servicio debe tener su propia base de datos."}
+- [Mediante llamadas HTTP/REST o gRPC a las APIs de los microservicios]{.correct data-explanation="El BFF consume las APIs públicas de los microservicios downstream a través de HTTP/REST, gRPC u otros protocolos de comunicación. Nunca accede directamente a sus bases de datos. Esto mantiene el bajo acoplamiento entre servicios."}
+- [El BFF accede directamente a las bases de datos de los microservicios]{data-explanation="Acceder directamente a las bases de datos de otros servicios crea un acoplamiento fuerte. El BFF debe usar las APIs públicas de cada microservicio."}
+- [Los microservicios envían datos al BFF automáticamente]{data-explanation="El BFF es quien inicia las peticiones a los microservicios, no al revés. El BFF actúa como orquestador de las llamadas necesarias para cada cliente."}
+
+---
+
+## Que pasa si dos BFFs necesitan la misma logica de negocio? {.quiz-question}
+
+- [Cada BFF duplica la lógica, es inevitable]{data-explanation="Aunque algo de duplicación es esperada, la lógica de negocio core NO debería estar en los BFFs. Debería vivir en los microservicios downstream."}
+- [Se unifican los BFFs en uno solo]{data-explanation="Unificar los BFFs eliminaría su propósito principal: optimizar para cada tipo de cliente. La solución es mover la lógica compartida a un servicio downstream."}
+- [La lógica compartida debe estar en los microservicios downstream, no en los BFFs]{.correct data-explanation="Los BFFs solo deben contener lógica de PRESENTACION y ADAPTACION de datos. La lógica de negocio core pertenece a los microservicios. Si detectas lógica duplicada entre BFFs, es señal de que esa lógica debería ser un microservicio downstream compartido."}
+- [Se crea un 'BFF compartido' que ambos consumen]{data-explanation="Un 'BFF compartido' es esencialmente un microservicio más. La solución correcta es extraer esa lógica a un microservicio que los BFFs consuman."}
+
+---
+
+## Que problema resuelve el BFF con respecto al over-fetching? {.quiz-question}
+
+- [El BFF cachea datos para reducir llamadas]{data-explanation="Aunque el caching es un beneficio secundario, el problema principal de over-fetching es que el cliente recibe MAS datos de los que necesita. El BFF resuelve esto adaptando la respuesta."}
+- [El BFF comprime los datos para reducir el tamaño]{data-explanation="La compresión reduce el tamaño pero no elimina campos innecesarios. El BFF resuelve over-fetching al seleccionar y adaptar solo los campos que el cliente necesita."}
+- [El BFF adapta y filtra la respuesta para enviar solo los datos que cada cliente necesita]{.correct data-explanation="Over-fetching ocurre cuando un API retorna más datos de los necesarios. Ejemplo: la web necesita 20 campos de un producto pero el móvil solo 5. Sin BFF, ambos reciben los 20 campos. Con BFF, el BFF-mobile filtra y retorna solo los 5 campos necesarios, ahorrando ancho de banda y procesamiento en el cliente."}
+- [El BFF pagina automáticamente todas las respuestas]{data-explanation="La paginación es útil pero no resuelve over-fetching directamente. El BFF resuelve over-fetching al retornar solo los campos específicos que necesita cada tipo de cliente."}
+
+---
+
+## Cuantos BFFs deberia tener un proyecto tipicamente? {.quiz-question}
+
+- [Solo uno, para mantener la simplicidad]{data-explanation="Un solo BFF que sirva a todos los clientes es esencialmente un API Gateway genérico y pierde el beneficio de optimización por cliente."}
+- [Uno por cada microservicio backend]{data-explanation="Los BFFs no corresponden a microservicios, sino a tipos de CLIENTES. Tener un BFF por microservicio crearía una complejidad innecesaria."}
+- [Uno por cada tipo de cliente o experiencia de usuario]{.correct data-explanation="La regla general es un BFF por tipo de cliente: BFF-Web, BFF-Mobile, BFF-IoT, etc. Algunos equipos crean un BFF por equipo de producto si las necesidades son muy distintas. La clave es que cada BFF sea propiedad de un equipo de frontend y optimice la experiencia de SU cliente."}
+- [Tantos como developers haya en el equipo]{data-explanation="El número de BFFs no depende del tamaño del equipo sino de la cantidad de TIPOS DE CLIENTES con necesidades diferentes."}
+
+---
+
+## Que tipo de logica debe contener un BFF? {.quiz-question}
+
+- [Lógica de negocio core del dominio]{data-explanation="La lógica de negocio core pertenece a los microservicios downstream. El BFF solo debe tener lógica de presentación y adaptación."}
+- [Lógica de agregación de datos, transformación de formatos y adaptación de respuestas para el cliente]{.correct data-explanation="El BFF contiene: 1) Agregación: combinar datos de múltiples microservicios en una sola respuesta. 2) Transformación: adaptar formatos (ej: fechas, monedas). 3) Filtrado: enviar solo los campos necesarios. 4) Orquestación: coordinar las llamadas necesarias. NUNCA debe tener lógica de negocio, validaciones de dominio o acceso directo a bases de datos."}
+- [Lógica de autenticación y autorización]{data-explanation="Auth es un cross-cutting concern que típicamente maneja el API Gateway, no el BFF. El BFF puede propagar tokens pero no debería implementar la lógica de auth."}
+- [Lógica de persistencia y acceso a bases de datos]{data-explanation="El BFF NUNCA debe acceder directamente a bases de datos. Debe consumir las APIs de los microservicios que manejan la persistencia."}
+
+---
+
+## Como afecta el patron BFF al deployment? {.quiz-question}
+
+- [Todos los BFFs se despliegan juntos en un solo artefacto]{data-explanation="Desplegar todos juntos anula la independencia del patrón BFF. Cada BFF debería poder desplegarse independientemente."}
+- [Cada BFF se despliega independientemente, lo que permite releases por cliente]{.correct data-explanation="Cada BFF es un servicio independiente con su propio ciclo de vida. El equipo de Web puede desplegar su BFF-Web sin afectar al BFF-Mobile. Esto permite: releases independientes, escalado independiente y no se bloquean entre equipos. El trade-off es mayor carga operacional al tener más servicios que mantener."}
+- [Los BFFs se despliegan como parte de los microservicios backend]{data-explanation="Los BFFs son servicios separados de los microservicios backend. Combinarlos crearía acoplamiento entre frontend y backend."}
+- [Solo se despliegan cuando cambia el frontend]{data-explanation="Los BFFs pueden cambiar cuando lo requieran, ya sea por cambios en el frontend O por cambios en los servicios downstream."}
+
+---
+
+## Que pasa si un microservicio downstream falla y el BFF depende de el? {.quiz-question}
+
+- [El BFF también falla completamente]{data-explanation="Un buen BFF implementa patrones de resiliencia para manejar fallos parciales sin caer completamente."}
+- [El BFF debe implementar patrones de resiliencia como Circuit Breaker, fallbacks y respuestas degradadas]{.correct data-explanation="El BFF debe ser resiliente: 1) Circuit Breaker: si un servicio falla repetidamente, dejar de llamarlo temporalmente. 2) Fallbacks: retornar datos del cache o valores por defecto. 3) Respuesta degradada: retornar lo que sí funciona. Ejemplo: si el servicio de recomendaciones falla, el BFF retorna el producto sin recomendaciones en vez de fallar completamente."}
+- [El API Gateway se encarga de manejar ese fallo]{data-explanation="Aunque el Gateway puede tener resiliencia a nivel de routing, el BFF debe implementar su propia lógica de fallback porque conoce el contexto del cliente."}
+- [El cliente frontend maneja el error directamente]{data-explanation="El frontend sí debe manejar errores, pero el BFF debería minimizar los fallos visibles al usuario implementando degradación graceful."}
+
+---
+
+## Como beneficia el BFF al rendimiento de aplicaciones moviles? {.quiz-question}
+
+- [El BFF comprime automáticamente todas las respuestas]{data-explanation="La compresión la puede hacer cualquier servidor. El beneficio real del BFF para mobile es reducir el VOLUMEN de datos enviados al dispositivo."}
+- [Reduce el numero de llamadas HTTP y el tamaño del payload adaptándolo al móvil]{.correct data-explanation="El BFF-Mobile optimiza para móviles: 1) Reduce llamadas: agrega datos de varios servicios en una sola respuesta (en vez de 5 llamadas, el móvil hace 1). 2) Reduce payload: envía solo los campos necesarios para la UI móvil. 3) Adapta formatos: imágenes en resolución móvil, datos para offline. Esto ahorra batería, datos móviles y mejora el tiempo de carga."}
+- [El BFF almacena datos localmente en el dispositivo móvil]{data-explanation="El BFF es un servicio backend, no se ejecuta en el dispositivo. El almacenamiento local es responsabilidad de la app móvil."}
+- [No hay beneficio específico para móvil]{data-explanation="El BFF tiene beneficios significativos para móvil: menos llamadas HTTP, payloads más pequeños y respuestas optimizadas para pantallas pequeñas."}
+
+---
+
+## Cual es el principal anti-patron al implementar BFF? {.quiz-question}
+
+- [Tener un BFF por cada tipo de cliente]{data-explanation="Eso es precisamente lo correcto. El anti-patrón sería tener un BFF genérico que intente servir a todos los clientes."}
+- [Crear un BFF genérico que sirva a todos los clientes por igual]{.correct data-explanation="El 'One BFF to rule them all' es el principal anti-patrón. Si tu BFF sirve a web, mobile e IoT con la misma lógica, has creado un API Gateway glorificado y perdiste todos los beneficios del patrón. Cada BFF debe estar optimizado para UN tipo de cliente. Otro anti-patrón común es poner lógica de negocio en el BFF en vez de los microservicios."}
+- [Que el equipo de frontend sea dueño del BFF]{data-explanation="Al contrario, que el equipo de frontend sea owner del BFF es la práctica RECOMENDADA. Les da autonomía para evolucionar la API según sus necesidades."}
+- [Desplegar cada BFF de forma independiente]{data-explanation="El despliegue independiente es una VENTAJA del patrón, no un anti-patrón. Permite que cada equipo libere a su propio ritmo."}
+
+
+
+# Docker — Repaso
+
+Contenedorización y orquestación con Docker Compose.
+
+---
+
+## Dockerfile — Conceptos Clave {.smaller}
+
+| Instrucción | Qué hace | Ejemplo |
+|-------------|----------|---------|
+| `FROM` | Imagen base | `FROM eclipse-temurin:21-jre` |
+| `WORKDIR` | Directorio de trabajo | `WORKDIR /app` |
+| `COPY` | Copiar archivos | `COPY build/libs/*.jar app.jar` |
+| `RUN` | Ejecutar en build time | `RUN apt-get update` |
+| `ENV` | Variable de entorno | `ENV JAVA_OPTS="-Xmx512m"` |
+| `EXPOSE` | Puerto documentado | `EXPOSE 8080` |
+| `CMD` | Comando al iniciar | `CMD ["java", "-jar", "app.jar"]` |
+| `ENTRYPOINT` | Ejecutable principal | `ENTRYPOINT ["java"]` |
+| `ARG` | Variable solo en build | `ARG JAR_VERSION=1.0` |
+
+::: {.callout-warning}
+`ARG` solo está disponible en **tiempo de build**. `ENV` persiste en el **contenedor en ejecución**.
+:::
+
+---
+
+## Multi-Stage Build {.smaller}
+
+Separar **compilación** de **ejecución** para imágenes más livianas.
+
+```{mermaid}
+graph LR
+    subgraph "Stage 1: Builder (~800MB)"
+        JDK[JDK + Gradle]
+        SRC[Código Fuente]
+        BUILD["./gradlew bootJar"]
+        JAR["app.jar"]
+    end
+    
+    subgraph "Stage 2: Runtime (~280MB)"
+        JRE[JRE Only]
+        JARR["COPY --from=builder app.jar"]
+    end
+    
+    JDK --> SRC
+    SRC --> BUILD
+    BUILD --> JAR
+    JAR -.->|"COPY --from=builder"| JARR
+
+    style JDK fill:#ff5555,color:#fff
+    style JRE fill:#50fa7b,color:#000
+    style JARR fill:#50fa7b,color:#000
+```
+
+::: {.callout-tip}
+Con multi-stage builds, la imagen final **no incluye** JDK, Gradle, ni código fuente — solo el JRE y el JAR.
+:::
+
+---
+
+## Docker Compose — Repaso {.smaller}
+
+::: columns
+::: {.column width="55%"}
+```yaml
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=jdbc:postgresql://db:5432/arka
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+
+volumes:
+  pgdata:
+```
+:::
+
+::: {.column width="45%"}
+**Conceptos clave:**
+
+- **`services`**: cada contenedor
+- **`build`**: construir desde Dockerfile
+- **`image`**: usar imagen existente
+- **`ports`**: host:container
+- **`environment`**: variables de entorno
+- **`depends_on`**: orden de inicio
+- **`volumes`**: persistencia
+- **`healthcheck`**: verificar salud
+- **`networks`**: redes personalizadas
+:::
+:::
+
+---
+
+## Volúmenes y Networking {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Tipos de Volúmenes:**
+
+| Tipo | Uso |
+|------|-----|
+| **Named Volume** | Persistencia (prod) |
+| **Bind Mount** | Desarrollo (hot-reload) |
+| **tmpfs** | Datos temporales en RAM |
+
+```bash
+# Named Volume
+-v pgdata:/var/lib/postgresql/data
+
+# Bind Mount
+-v $(pwd)/src:/app/src
+```
+:::
+
+::: {.column width="50%"}
+**Networking:**
+
+```{mermaid}
+graph TB
+    subgraph "docker network"
+        APP[app] <-->|DNS: db| DB[postgres]
+        APP <-->|DNS: kafka| KF[kafka]
+    end
+```
+
+- Redes custom → resolución DNS por nombre
+- `docker network create mi-red`
+- En compose: automáticamente cada servicio se resuelve por nombre
+:::
+:::
+
+---
+
+## Comandos Esenciales {.smaller}
+
+```bash
+# Docker
+docker build -t mi-app:1.0 .           # Construir imagen
+docker run -d -p 8080:8080 mi-app:1.0   # Ejecutar contenedor
+docker ps                                # Listar contenedores activos
+docker logs -f <container>               # Ver logs en tiempo real
+docker exec -it <container> /bin/bash    # Entrar al contenedor
+
+# Docker Compose
+docker compose up -d                     # Iniciar todos los servicios
+docker compose down                      # Detener y eliminar
+docker compose logs -f <service>         # Logs de un servicio
+docker compose ps                        # Estado de servicios
+docker compose up -d --scale app=3       # Escalar servicio
+```
+
+
+
+# Quiz: Docker
+
+---
+
+## ¿Cuál es la diferencia entre una **imagen** y un **contenedor** en Docker? {.quiz-question}
+
+- [Son lo mismo, son sinónimos]{data-explanation="No son sinónimos. Una imagen es una plantilla y un contenedor es una instancia ejecutándose."}
+- [La imagen es una plantilla de solo lectura; el contenedor es una instancia en ejecución de esa imagen]{.correct data-explanation="Correcto. Piensa en la imagen como una 'Clase' y el contenedor como un 'Objeto' en POO."}
+- [El contenedor es una imagen comprimida]{data-explanation="No es una versión comprimida. Un contenedor tiene una capa de escritura sobre la imagen."}
+- [La imagen solo existe en Docker Hub]{data-explanation="Las imágenes pueden existir localmente o en cualquier registry, no solo Docker Hub."}
+
+---
+
+## ¿Para qué sirve un Multi-Stage Build? {.quiz-question}
+
+- [Para ejecutar múltiples aplicaciones en un contenedor]{data-explanation="Multi-stage NO es para múltiples apps. Es para separar fases de build y runtime."}
+- [Para crear múltiples contenedores a la vez]{data-explanation="Eso lo hace Docker Compose. Multi-stage es para optimizar una sola imagen."}
+- [Para separar la fase de compilación de la de ejecución y reducir el tamaño de la imagen final]{.correct data-explanation="Correcto. El stage de build incluye JDK+Gradle, pero la imagen final solo tiene JRE+JAR, reduciendo ~60% del tamaño."}
+- [Para construir imágenes en paralelo]{data-explanation="Aunque Docker puede paralelizar, el propósito principal es reducir el tamaño de la imagen final."}
+
+---
+
+## ¿Qué hace `EXPOSE 8080` en un Dockerfile? {.quiz-question}
+
+- [Abre automáticamente el puerto 8080 al host]{data-explanation="EXPOSE NO abre puertos automáticamente. Necesitas -p 8080:8080 en docker run para eso."}
+- [Bloquea el tráfico en el puerto 8080]{data-explanation="EXPOSE no bloquea nada, es una documentación del puerto que usa la app."}
+- [Documenta que la aplicación dentro del contenedor escucha en el puerto 8080]{.correct data-explanation="EXPOSE es como documentación/metadata. Para realmente publicar el puerto necesitas -p en docker run o ports en compose."}
+- [Configura el firewall del contenedor]{data-explanation="Docker no gestiona firewalls con EXPOSE. Es solo una anotación informativa."}
+
+---
+
+## ¿Cuál comando de Compose escala un servicio a 3 instancias? {.quiz-question}
+
+- `docker compose replicate app 3`{data-explanation="El comando 'replicate' no existe en Docker Compose."}
+- `docker compose run --instances 3 app`{data-explanation="'run' ejecuta un comando one-off y no tiene --instances."}
+- [`docker compose up -d --scale app=3`]{.correct data-explanation="Correcto. --scale <servicio>=<N> permite ejecutar múltiples instancias del mismo servicio."}
+- `docker compose start app app app`{data-explanation="Repetir el nombre no crea múltiples instancias."}
+
+---
+
+## ¿Cuál es la diferencia entre ARG y ENV en un Dockerfile? {.quiz-question}
+
+- [No hay diferencia, son intercambiables]{data-explanation="NO son intercambiables. Tienen alcances completamente diferentes."}
+- [ARG se usa en el contenedor y ENV solo en el build]{data-explanation="¡Es al revés! ARG es para build y ENV persiste en el contenedor."}
+- [ARG solo está disponible en tiempo de build; ENV persiste en el contenedor en ejecución]{.correct data-explanation="Correcto. ARG desaparece después del build. ENV se configura como variable de entorno dentro del contenedor running."}
+- [ENV se define en docker-compose y ARG en Dockerfile]{data-explanation="Ambos se pueden definir en Dockerfile. ENV también se puede sobreescribir con -e en docker run."}
+
+---
+
+## Cual es la diferencia entre COPY y ADD en un Dockerfile? {.quiz-question}
+
+- [Son exactamente iguales, hacen lo mismo]{data-explanation="No son iguales. ADD tiene funcionalidad adicional que COPY no tiene, lo cual puede ser tanto una ventaja como un riesgo."}
+- [COPY solo copia archivos locales; ADD además puede descargar URLs y extraer archivos tar automáticamente]{.correct data-explanation="COPY es simple: copia archivos/directorios del contexto de build al contenedor. ADD hace lo mismo PERO además: 1) Puede descargar archivos desde URLs. 2) Extrae automáticamente archivos .tar, .gz, .bz2. La mejor práctica de Docker es usar COPY siempre que sea posible y ADD solo cuando necesites extraer archivos tar. Esto hace el Dockerfile más predecible."}
+- [ADD es más rápido que COPY]{data-explanation="No hay diferencia de rendimiento. La diferencia es funcional: ADD tiene capacidades extra de descarga y extracción automática."}
+- [COPY funciona solo en Linux y ADD en cualquier plataforma]{data-explanation="Ambas instrucciones funcionan en cualquier plataforma soportada por Docker. La diferencia es funcional, no de plataforma."}
+
+---
+
+## Cual es la diferencia entre CMD y ENTRYPOINT en un Dockerfile? {.quiz-question}
+
+- [Son lo mismo, se pueden usar indistintamente]{data-explanation="No son lo mismo. Tienen comportamientos diferentes cuando el usuario pasa argumentos en docker run."}
+- [CMD define el comando por defecto que puede ser sobreescrito; ENTRYPOINT define el ejecutable principal que siempre se ejecuta]{.correct data-explanation="CMD establece el comando por defecto que se puede reemplazar completamente con docker run \u003cimagen\u003e \u003cotro-comando\u003e. ENTRYPOINT define el ejecutable fijo; los argumentos de docker run se AGREGAN al ENTRYPOINT. Patrón común: ENTRYPOINT ['java', '-jar'] + CMD ['app.jar']. Si haces docker run imagen otro.jar, ejecuta java -jar otro.jar (ENTRYPOINT fijo + CMD reemplazado)."}
+- [ENTRYPOINT es para desarrollo y CMD para producción]{data-explanation="Ambos se usan indistintamente en dev y prod. La diferencia es cómo manejan los argumentos del usuario, no el entorno."}
+- [CMD se ejecuta en build time y ENTRYPOINT en runtime]{data-explanation="Ambos se ejecutan en RUNTIME cuando el contenedor inicia. RUN es la instrucción que se ejecuta en build time."}
+
+---
+
+## Como funciona el cache de capas en Docker? {.quiz-question}
+
+- [Docker no usa cache, siempre reconstruye todo]{data-explanation="Docker tiene un sistema de cache de capas muy efectivo. Cada instrucción del Dockerfile crea una capa que se cachea. Solo reconstruye si detecta cambios."}
+- [Cada instrucción del Dockerfile crea una capa; si una capa cambia, todas las capas posteriores se reconstruyen]{.correct data-explanation="Docker cachea cada capa del Dockerfile. Si el contenido de una instrucción no cambió, usa la versión cacheada. PERO si una capa cambia, TODAS las capas que vienen después se invalidan y reconstruyen. Por eso el ORDER importa: pon las instrucciones que cambian menos frecuentemente primero (ej: COPY pom.xml + RUN mvn install ANTES de COPY src/). Así solo se recompila cuando el código cambia, no cuando las dependencias no cambiaron."}
+- [Docker cachea solo la imagen final, no las capas intermedias]{data-explanation="Docker cachea CADA capa intermedia, no solo la final. Por eso el orden del Dockerfile afecta tanto el tiempo de build."}
+- [El cache solo funciona si usas la misma máquina para construir]{data-explanation="Aunque el cache local es lo más común, Docker también soporta cache remoto con buildx y registries. Además, Docker BuildKit permite importar/exportar cache."}
+
+---
+
+## Para que sirve el archivo .dockerignore? {.quiz-question}
+
+- [Para listar los archivos que Docker debe incluir en la imagen]{data-explanation="Es al revés. .dockerignore lista los archivos que Docker debe EXCLUIR del contexto de build. Todo lo que no está listado SI se incluye."}
+- [Para excluir archivos y directorios del contexto de build, reduciendo el tamaño y tiempo de build]{.correct data-explanation=".dockerignore funciona como .gitignore pero para Docker. Excluye archivos del contexto de build que se envía al Docker daemon. Beneficios: 1) Reduce el tamaño del contexto (más rápido). 2) Evita copiar archivos innecesarios (.git, node_modules, .env). 3) Previene que secretos se incluyan accidentalmente en la imagen. Ejemplo típico: .git, node_modules, *.log, .env, build/, target/."}
+- [Para configurar las redes del contenedor]{data-explanation="Las redes se configuran en docker-compose.yml o con docker run --network. .dockerignore solo afecta el contexto de build."}
+- [Para definir variables de entorno del contenedor]{data-explanation="Las variables de entorno se definen con ENV en el Dockerfile o con -e en docker run. .dockerignore excluye archivos del build."}
+
+---
+
+## Que hace el healthcheck en Docker Compose? {.quiz-question}
+
+- [Reinicia automáticamente el contenedor si falla]{data-explanation="El healthcheck solo DETECTA si el servicio está saludable. No reinicia contenedores. Para restart automático necesitas restart: always en compose o un orchestrator como Kubernetes."}
+- [Verifica periódicamente si el servicio dentro del contenedor está funcionando correctamente]{.correct data-explanation="healthcheck ejecuta un comando periódicamente para verificar la salud del servicio. Ejemplo: test: ['CMD-SHELL', 'pg_isready'] para PostgreSQL. Los estados son: starting, healthy, unhealthy. Es crucial con depends_on + condition: service_healthy para asegurar que un servicio esté REALMENTE listo (no solo que el contenedor inició)."}
+- [Monitorea el uso de CPU y memoria del contenedor]{data-explanation="El healthcheck verifica la salud funcional del servicio (por ejemplo, si responde a peticiones). El monitoreo de recursos lo hacen herramientas como docker stats o Prometheus."}
+- [Envía alertas al administrador cuando un servicio falla]{data-explanation="El healthcheck solo cambia el estado del contenedor (healthy/unhealthy). Para alertas necesitas herramientas adicionales de monitoreo."}
+
+---
+
+## Cual es el ciclo de vida de un contenedor Docker? {.quiz-question}
+
+- [Solo tiene dos estados: running y stopped]{data-explanation="Un contenedor tiene más estados: created, running, paused, stopped, dead. El ciclo completo incluye creación, inicio, posible pausa y detención."}
+- [Created, Running, Paused, Stopped, Removed]{.correct data-explanation="El ciclo completo es: 1) Created: docker create - contenedor existe pero no corre. 2) Running: docker start/run - el proceso principal está ejecutándose. 3) Paused: docker pause - procesos congelados (SIGSTOP). 4) Stopped/Exited: docker stop - proceso terminó (SIGTERM + SIGKILL). 5) Removed: docker rm - eliminado del sistema. docker run combina create + start en un solo comando."}
+- [Build, Deploy, Run, Destroy]{data-explanation="Esos son estados de una imagen o un despliegue, no de un contenedor. Built es para imágenes. Un contenedor tiene estados como created, running, paused, stopped."}
+- [Pull, Install, Execute, Uninstall]{data-explanation="Pull es para imágenes, no contenedores. Los contenedores no se 'instalan'. Sus estados son created, running, paused, stopped."}
+
+---
+
+## Que tipos de redes soporta Docker? {.quiz-question}
+
+- [Solo un tipo: la red por defecto]{data-explanation="Docker soporta múltiples drivers de red, cada uno con un propósito diferente."}
+- [bridge, host, overlay, none, y macvlan]{.correct data-explanation="Docker soporta varios drivers: 1) bridge (default): red aislada, los contenedores se comunican entre sí. 2) host: el contenedor comparte la red del host (sin aislamiento). 3) overlay: para comunicación entre contenedores en diferentes hosts (Docker Swarm). 4) none: sin networking. 5) macvlan: asigna una MAC address al contenedor, aparece como dispositivo físico. En Docker Compose, se crea automáticamente una red bridge por proyecto."}
+- [Solo bridge y host]{data-explanation="Además de bridge y host, Docker soporta overlay (multi-host), none y macvlan. Cada uno tiene casos de uso específicos."}
+- [TCP, UDP y HTTP]{data-explanation="TCP, UDP y HTTP son protocolos de comunicación, no tipos de red Docker. Docker usa drivers de red: bridge, host, overlay, none, macvlan."}
+
+---
+
+## Que hace `depends_on` con `condition: service_healthy` en Docker Compose? {.quiz-question}
+
+- [Solo define el orden de inicio de los contenedores]{data-explanation="depends_on sin condition solo define orden. Con condition: service_healthy, además espera a que el servicio pase su healthcheck antes de iniciar el dependiente."}
+- [Espera a que el servicio dependido esté healthy (pase su healthcheck) antes de iniciar el servicio dependiente]{.correct data-explanation="depends_on con condition: service_healthy es crucial para microservicios. Sin condition, Docker solo espera a que el CONTENEDOR inicie, no a que el SERVICIO esté listo. Ejemplo: tu app Spring depende de PostgreSQL. Sin la condición, la app puede iniciar antes de que Postgres acepte conexiones. Con service_healthy + healthcheck con pg_isready, Docker espera a que Postgres realmente esté listo."}
+- [Reinicia el servicio dependiente si el otro falla]{data-explanation="depends_on no maneja reinicio. Para eso necesitas restart: always o un orchestrator. depends_on con condition solo controla el orden de inicio inicial."}
+- [Crea una red privada entre los dos servicios]{data-explanation="Las redes en Compose se crean automáticamente para todos los servicios. depends_on controla el orden de inicio, no la networking."}
+
+---
+
+## Cual es la diferencia entre una imagen con tag `latest` y una con version especifica? {.quiz-question}
+
+- [latest siempre tiene las últimas correcciones y es más segura]{data-explanation="latest puede cambiar en cualquier momento sin previo aviso. Esto la hace MENOS predecible y potencialmente menos segura que una versión fija."}
+- [No hay diferencia, son idénticas]{data-explanation="Son MUY diferentes. latest es un tag mutable que apunta a diferentes versiones con el tiempo. Un tag de versión específica es inmutable."}
+- [latest es un tag mutable que puede cambiar; un tag de version especifica es fijo y predecible]{.correct data-explanation="latest es simplemente un tag que los mantenedores actualizan cuando publican una nueva versión. El problema es que no sabes QUE versión estás usando. Ejemplo: postgres:latest hoy puede ser 16.2 y mañana 17.0 con breaking changes. Usar postgres:16.2 garantiza reproducibilidad. En producción SIEMPRE usa tags de versión específica para builds reproducibles y seguros."}
+- [El tag latest no se puede usar en Dockerfiles]{data-explanation="Sí se puede usar latest en FROM, pero es una mala práctica porque el build no es reproducible. Es mejor especificar la versión exacta."}
+
+---
+
+## Para que se usa `docker exec -it`? {.quiz-question}
+
+- [Para crear un nuevo contenedor interactivo]{data-explanation="docker exec ejecuta un comando en un contenedor YA existente y corriendo. Para crear uno nuevo se usa docker run."}
+- [Para ejecutar un comando dentro de un contenedor que ya está corriendo, con terminal interactiva]{.correct data-explanation="docker exec ejecuta un proceso adicional dentro de un contenedor running. Los flags: -i (interactive, mantiene STDIN abierto) + -t (TTY, asigna un terminal). Uso típico: docker exec -it mi-contenedor /bin/bash para abrir una shell dentro del contenedor. Útil para debugging, inspeccionar archivos, ejecutar queries SQL, ver logs internos, etc. El proceso exec es independiente del proceso principal del contenedor."}
+- [Para detener un contenedor de forma interactiva]{data-explanation="Para detener un contenedor se usa docker stop. docker exec es para ejecutar comandos adicionales dentro de un contenedor que sigue corriendo."}
+- [Para ver los logs del contenedor en tiempo real]{data-explanation="Para ver logs se usa docker logs -f. docker exec es para ejecutar comandos arbitrarios dentro del contenedor."}
+
+
+
+# Resumen
+
+---
+
+## Lo que debes saber para el Quiz 4 {.smaller}
+
+::: columns
+::: {.column width="33%"}
+**Programación Funcional**
+
+- Interfaces funcionales (Function, Predicate, Consumer, Supplier)
+- Lambdas y Method References
+- Stream API (filter, map, flatMap, collect, reduce)
+- Optional y sus métodos
+- Operaciones intermedias vs terminales
+:::
+
+::: {.column width="33%"}
+**BFF**
+
+- Qué es API Gateway
+- BFF = Backend for Frontend
+- Diferencias API Gateway vs BFF
+- Cuándo usar y cuándo NO
+- BFF coexiste con Gateway
+- Quién es owner del BFF
+:::
+
+::: {.column width="33%"}
+**Docker**
+
+- Imagen vs Contenedor
+- Dockerfile (FROM, COPY, RUN, CMD, ENV, ARG, EXPOSE)
+- Multi-Stage Builds
+- Docker Compose (services, volumes, networks)
+- Volúmenes (Named, Bind Mount)
+- Networking y DNS
+- Comandos esenciales
+:::
+:::
+
+::: {.callout-tip}
+**¡Éxitos en el quiz!**
+:::
+
+```{=html}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Create overlay element
+  var overlay = document.createElement('div');
+  overlay.id = 'quiz-explanation-overlay';
+  overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(20,21,30,0.94); z-index:99999; cursor:pointer; backdrop-filter:blur(6px); animation:fadeInOverlay 0.25s ease-out;';
+  
+  var overlayContent = document.createElement('div');
+  overlayContent.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); max-width:80vw; text-align:center;';
+  
+  var overlayIcon = document.createElement('div');
+  overlayIcon.id = 'overlay-icon';
+  overlayIcon.style.cssText = 'font-size:3em; margin-bottom:0.5em;';
+  
+  var overlayText = document.createElement('div');
+  overlayText.id = 'overlay-text';
+  overlayText.style.cssText = 'font-size:1.5em; line-height:1.6; color:#f8f8f2; font-weight:500;';
+  
+  var overlayHint = document.createElement('div');
+  overlayHint.style.cssText = 'position:absolute; bottom:2rem; left:50%; transform:translateX(-50%); font-size:0.9em; color:#6272a4; font-style:italic;';
+  overlayHint.textContent = 'Clic o cualquier tecla para cerrar';
+  
+  overlayContent.appendChild(overlayIcon);
+  overlayContent.appendChild(overlayText);
+  overlay.appendChild(overlayContent);
+  overlay.appendChild(overlayHint);
+  document.body.appendChild(overlay);
+  
+  function showOverlay(isCorrect, explanation) {
+    overlayIcon.textContent = isCorrect ? '✅' : '❌';
+    overlayText.innerHTML = explanation;
+    overlayText.style.color = isCorrect ? '#50fa7b' : '#ff6e6e';
+    overlay.style.display = 'block';
+    // Disable Reveal keyboard while overlay is open
+    if (window.Reveal) Reveal.configure({ keyboard: false });
+  }
+  
+  function hideOverlay() {
+    overlay.style.display = 'none';
+    if (window.Reveal) Reveal.configure({ keyboard: true });
+  }
+  
+  // Close overlay on click
+  overlay.addEventListener('click', hideOverlay);
+  
+  // Close overlay on any key
+  document.addEventListener('keydown', function(e) {
+    if (overlay.style.display === 'block') {
+      e.preventDefault();
+      e.stopPropagation();
+      hideOverlay();
+    }
+  }, true); // capture phase to intercept before Reveal.js
+  
+  // Watch for Check button clicks using MutationObserver
+  // The quiz extension sets textContent on .feedback elements
+  var observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      if (mutation.type === 'childList' || mutation.type === 'characterData') {
+        var target = mutation.target;
+        if (target.classList && target.classList.contains('feedback') && target.textContent.trim() !== '') {
+          // Find the parent quiz slide
+          var slide = target.closest('.quiz-question');
+          if (!slide) return;
+          
+          // Find selected option
+          var selectedOpt = slide.querySelector('.option-button.selected');
+          if (!selectedOpt) return;
+          
+          // Read data-explanation from any child or the option itself
+          var explanation = null;
+          var isCorrect = false;
+          
+          // Check for span or code with data-explanation
+          var child = selectedOpt.querySelector('[data-explanation]');
+          if (child) {
+            explanation = child.getAttribute('data-explanation');
+          }
+          
+          // Detect if correct
+          isCorrect = selectedOpt.classList.contains('correct') || 
+                      (selectedOpt.querySelector('.correct') !== null);
+          
+          if (explanation) {
+            showOverlay(isCorrect, explanation);
+          }
+        }
+      }
+    });
+  });
+  
+  // Observe all feedback elements as they are created
+  var bodyObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      mutation.addedNodes.forEach(function(node) {
+        if (node.classList && node.classList.contains('feedback')) {
+          observer.observe(node, { childList: true, characterData: true, subtree: true });
+        }
+      });
+    });
+  });
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
+  
+  // Also observe existing feedback elements
+  document.querySelectorAll('.feedback').forEach(function(fb) {
+    observer.observe(fb, { childList: true, characterData: true, subtree: true });
+  });
+});
+</script>
+```

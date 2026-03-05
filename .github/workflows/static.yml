@@ -58,6 +58,7 @@ jobs:
             clase_18_19_ddd_eventos_servicios_dominio
             clase_22_23_docker
             clase_24_25_patrones_arquitectura_microservicios
+            clase_26_repaso_quiz_4
         run: |
           for dir in $QUARTO_DIRS; do
             quarto render $dir/index.qmd
@@ -72,6 +73,7 @@ jobs:
             clase_18_19_ddd_eventos_servicios_dominio
             clase_22_23_docker
             clase_24_25_patrones_arquitectura_microservicios
+            clase_26_repaso_quiz_4
         run: |
           set -e
           mkdir -p _site
@@ -85,6 +87,7 @@ jobs:
               --include="images/***" \
               --include="img/***" \
               --include="styles.css" \
+              --include="_extensions/***" \
               --exclude="*" \
               $dir/ _site/$dir/
           done

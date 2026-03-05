@@ -1,0 +1,160 @@
+.border {
+  border: 1px solid #dee2e6;
+}
+
+.border-thick {
+  border-width: 3px;
+}
+
+/* Callouts personalizados */
+.callout-note {
+  border-left-color: #8be9fd !important;
+}
+
+.callout-warning {
+  border-left-color: #ffb86c !important;
+}
+
+.callout-tip {
+  border-left-color: #50fa7b !important;
+}
+
+/* Mejoras para tablas */
+.reveal table {
+  font-size: 0.75em;
+}
+
+.reveal table th {
+  background-color: #44475a;
+}
+
+/* Mejoras para listas */
+.reveal ul li {
+  margin-bottom: 0.5em;
+}
+
+/* Estilos para diagramas mermaid */
+.mermaid {
+  background-color: transparent !important;
+}
+
+/* ===========================
+   Quiz Styles (Dracula theme)
+   =========================== */
+
+/* Quiz question slide — constrain content to fit */
+.reveal .quiz-question h2 {
+  color: #f8f8f2;
+  font-size: 1.05em;
+  border-bottom: 2px solid #bd93f9;
+  padding-bottom: 0.2em;
+  margin-bottom: 0.4em;
+  margin-top: 0;
+}
+
+/* Prevent quiz slides from overflowing */
+.reveal .quiz-question {
+  font-size: 0.7em;
+}
+
+.reveal .quiz-question pre {
+  font-size: 0.85em;
+  margin: 0.3em 0;
+}
+
+/* Quiz option buttons — compact sizing */
+.reveal .quiz-question li {
+  list-style: none;
+  margin-bottom: 0.25em;
+}
+
+.reveal .quiz-question li.option-button {
+  padding: 0.4em 0.8em;
+  font-size: 1em;
+  border-radius: 8px;
+  line-height: 1.3;
+}
+
+.reveal .quiz-question li.option-button code {
+  font-size: 0.95em;
+  white-space: normal;
+  word-wrap: break-word;
+  color: inherit !important;
+}
+
+/* Hide .correct class styling on spans so correct answer isn't revealed */
+.reveal .quiz-question li span.correct,
+.reveal .quiz-question li span {
+  color: inherit !important;
+  background: none !important;
+  font-weight: inherit !important;
+}
+
+/* Action buttons — smaller */
+.reveal .quiz-question .action-buttons {
+  font-size: 16px;
+}
+
+.reveal .quiz-question .button-container {
+  margin-top: 0.4em;
+}
+
+/* Score display — always visible */
+.reveal .score {
+  color: #50fa7b !important;
+  font-weight: bold;
+  font-size: 0.9em !important;
+}
+
+/* ===========================
+   Feedback Overlay
+   =========================== */
+
+/* Hide the default small feedback text — our custom JS overlay replaces it */
+.reveal .quiz-question .feedback {
+  font-size: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+@keyframes fadeInOverlay {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Resumen/repaso slide indicators */
+.reveal .slide-repaso h2::before {
+  content: "📝 ";
+}
+
+/* Código terminal */
+.terminal-output {
+  background-color: #1e1e1e;
+  border-left: 3px solid #50fa7b;
+  padding: 0.5em;
+  font-size: 0.8em;
+}
+
+/* Highlight colors for topics */
+.highlight-funcional {
+  color: #ff79c6;
+  font-weight: bold;
+}
+
+.highlight-bff {
+  color: #bd93f9;
+  font-weight: bold;
+}
+
+.highlight-docker {
+  color: #2496ED;
+  font-weight: bold;
+}
