@@ -59,6 +59,7 @@ jobs:
             clase_22_23_docker
             clase_24_25_patrones_arquitectura_microservicios
             clase_26_repaso_quiz_4
+            clase_27_28_spring_boot_parte_1
         run: |
           for dir in $QUARTO_DIRS; do
             quarto render $dir/index.qmd
@@ -74,6 +75,7 @@ jobs:
             clase_22_23_docker
             clase_24_25_patrones_arquitectura_microservicios
             clase_26_repaso_quiz_4
+            clase_27_28_spring_boot_parte_1
         run: |
           set -e
           mkdir -p _site
