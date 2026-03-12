@@ -28,7 +28,10 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: 'lab_1_docker_localstack/package-lock.json'
+          cache-dependency-path: |
+            lab_1_docker_localstack/package-lock.json
+            lab_2_arka_microservicios_reactivos/package-lock.json
+            clase_29_deep_dive_arka_architecture/package-lock.json
       
       # Setup Quarto
       - name: Setup Quarto
@@ -45,6 +48,12 @@ jobs:
 
       - name: Build Docusaurus arka microservicios reactivos
         working-directory: lab_2_arka_microservicios_reactivos
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Docusaurus deep dive arka architecture
+        working-directory: clase_29_deep_dive_arka_architecture
         run: |
           npm ci
           npm run build
@@ -102,6 +111,7 @@ jobs:
           # Copy Docusaurus builds
           cp -r lab_1_docker_localstack/build _site/lab_1_docker_localstack
           cp -r lab_2_arka_microservicios_reactivos/build _site/lab_2_arka_microservicios_reactivos
+          cp -r clase_29_deep_dive_arka_architecture/build _site/clase_29_deep_dive_arka_architecture
 
           # Copy root index
           cp index.html _site/

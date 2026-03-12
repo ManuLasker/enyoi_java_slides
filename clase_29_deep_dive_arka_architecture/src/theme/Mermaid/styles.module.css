@@ -1,0 +1,182 @@
+.container {
+  --mermaid-viewer-height: clamp(240px, 34vh, 360px);
+  --mermaid-viewer-height-mobile: clamp(220px, 30vh, 300px);
+}
+
+.container {
+  position: relative;
+  isolation: isolate;
+  max-width: 100%;
+  margin: 1.25rem 0;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 12px;
+  background: var(--ifm-background-surface-color);
+  overflow: hidden;
+}
+
+.viewer {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.hint {
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-color-emphasis-100);
+}
+
+.controls button {
+  border: 1px solid var(--ifm-color-emphasis-400);
+  border-radius: 8px;
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  cursor: pointer;
+  padding: 0.35rem 0.65rem;
+  font-weight: 600;
+}
+
+.controls button:hover {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+}
+
+.transformWrapper {
+  position: relative;
+  width: 100%;
+  height: var(--mermaid-viewer-height) !important;
+  background: var(--ifm-background-color);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.isPanning .transformWrapper {
+  cursor: grabbing;
+}
+
+.transformContent {
+  display: inline-block;
+  min-width: 0;
+  min-height: 0;
+}
+
+.diagram {
+  display: inline-block;
+  min-width: 0;
+  width: auto;
+  padding: 1rem;
+}
+
+.diagram :global(svg) {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
+.container :global(.react-transform-wrapper) {
+  width: 100%;
+  height: var(--mermaid-viewer-height) !important;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.container :global(.react-transform-component-wrapper) {
+  width: 100%;
+  height: var(--mermaid-viewer-height) !important;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.container :global(.react-transform-component) {
+  width: auto;
+  height: auto;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.86);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.close {
+  align-self: flex-end;
+  border: 1px solid #ffffff;
+  border-radius: 8px;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0.4rem 0.8rem;
+  margin: 0.75rem;
+}
+
+.overlayInner {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100vh - 2rem);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  background: #111111;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.overlayInner .transformWrapper {
+  height: calc(100% - 56px);
+  background: #111111;
+}
+
+.overlayInner .controls {
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.overlayInner .controls button {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.2);
+  color: #ffffff;
+}
+
+.overlayInner .hint {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.overlayInner .close {
+  margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+  .controls {
+    flex-wrap: wrap;
+  }
+
+  .hint {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .transformWrapper {
+    height: var(--mermaid-viewer-height-mobile) !important;
+  }
+
+  .container :global(.react-transform-wrapper),
+  .container :global(.react-transform-component-wrapper) {
+    height: var(--mermaid-viewer-height-mobile) !important;
+  }
+}
