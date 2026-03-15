@@ -14,4 +14,5 @@ base_url: https://manulasker.github.io/enyoi_java_slides/
 9. https://manulasker.github.io/enyoi_java_slides/lab_2_arka_microservicios_reactivos/
 10. https://manulasker.github.io/enyoi_java_slides/clase_26_repaso_quiz_4/
 11. https://manulasker.github.io/enyoi_java_slides/clase_27_28_spring_boot_parte_1/
-12. https://manulasker.github.io/enyoi_java_slides/clase_29_deep_dive_arka_architecture/
+12. https://manulasker.github.io/enyoi_java_slides/clase_27_28_spring_boot_parte_2/
+13. https://manulasker.github.io/enyoi_java_slides/clase_29_deep_dive_arka_architecture/
