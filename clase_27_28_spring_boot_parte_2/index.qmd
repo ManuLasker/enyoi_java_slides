@@ -853,6 +853,10 @@ flowchart LR
     style S1 fill:#ffb86c,color:#000
 ```
 
+::: {.callout-tip}
+Para profundizar en operadores reactivos con ejemplos visuales tipo marbles: [Project Reactor - How to read marbles](https://projectreactor.io/docs/core/release/reference/apdx-howtoReadMarbles.html).
+:::
+
 ---
 
 ## Alegoría Visual: Tubería y Gotas (Flux) {.smaller}
@@ -871,6 +875,7 @@ flowchart LR
 ```
 
 `subscribe()` es abrir la llave: si nadie se suscribe, no fluye ninguna gota.
+
 
 ---
 
