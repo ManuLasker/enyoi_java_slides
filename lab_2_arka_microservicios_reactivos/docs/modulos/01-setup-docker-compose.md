@@ -65,6 +65,9 @@ LOCALSTACK_PORT=4566
 LOCALSTACK_HOST=arka-localstack
 MS_ORDERS_PORT=8081
 MS_ORDERS_HOST=arka-ms-orders
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_REGION=us-east-1
 ```
 
 :::tip ¿Por qué usar `.env`?
@@ -259,6 +262,31 @@ services:
       - arka-network
 
   # ═══════════════════════════════════════════════════
+  # Kafka Init — Creación automática de topics SAGA
+  # ═══════════════════════════════════════════════════
+  kafka-init:
+    image: confluentinc/cp-kafka:8.0.4
+    container_name: arka-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+      echo '══════════════ Creando topics SAGA ══════════════' &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-created --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-reserved --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-released --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-processed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-failed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-confirmed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-cancelled --partitions 3 --replication-factor 1 &&
+      echo '═════════════════════════════════════════════════'
+      "
+    networks:
+      - arka-network
+
+  # ═══════════════════════════════════════════════════
   # KafkaUI — Visualización de mensajes en Kafka
   # ═══════════════════════════════════════════════════
   kafka-ui:
@@ -289,8 +317,8 @@ services:
       - .env
     volumes:
       - localstack-data:/var/lib/localstack
-      # - ./localstack/infra.yaml:/etc/localstack/init/ready.d/infra.yaml
-      # - ./localstack/bootstrap.sh:/etc/localstack/init/ready.d/bootstrap.sh
+      - ./localstack/infra.yaml:/etc/localstack/init/ready.d/infra.yaml
+      - ./localstack/bootstrap.sh:/etc/localstack/init/ready.d/bootstrap.sh
       - "/var/run/docker.sock:/var/run/docker.sock"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${LOCALSTACK_PORT}/_localstack/health"]

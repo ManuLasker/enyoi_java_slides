@@ -230,7 +230,8 @@ Resources:
             "paymentProcessed": "payment-processed",
             "paymentFailed": "payment-failed",
             "orderConfirmed": "order-confirmed",
-            "orderCancelled": "order-cancelled"
+            "orderCancelled": "order-cancelled",
+            "stockFailed": "stock-failed"
           }
         }
       Tags:

@@ -6,7 +6,7 @@ slug: ms-orders-implementacion
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Módulo 6: ms-orders — Implementación Completa
+# Módulo 6: ms-orders — Implementación Completa (versión funcional)
 
 :::tip Tiempo estimado
 ~2 horas
@@ -14,116 +14,245 @@ import TabItem from '@theme/TabItem';
 
 ## Objetivo
 
-Convertir el esqueleto de `ms-orders` (Módulo 5) en un microservicio funcional con **persistencia reactiva** (R2DBC), **gestión de secretos** (AWS Secrets Manager) y **mensajería** (Kafka). Este servicio será el **iniciador de la SAGA**.
+Completar `ms-orders` como microservicio real de la SAGA, exactamente con el patrón que ya tienes funcional:
+
+- Persistencia reactiva en PostgreSQL con R2DBC
+- Lectura de secretos desde LocalStack Secrets Manager
+- Publicación y consumo de eventos con Reactive Commons (`async-event-bus` y `async-event-handler`)
+- API REST para crear y consultar órdenes
 
 ```mermaid
 flowchart LR
-    CLIENT[🖥️ Client] -->|POST /api/orders| MS[ms-orders<br>:8081]
-    MS -->|R2DBC| DB[(db_orders)]
-    MS -->|Produce| K{{Kafka}}
-    K -->|Consume| MS
-    SM[🔐 Secrets Manager] -.->|credenciales| MS
-
-    style MS fill:#50fa7b,color:#282a36
-    style K fill:#ff79c6,color:#282a36
-    style SM fill:#ffb86c,color:#282a36
+    C[Client] -->|POST /api/orders| O[ms-orders :8081]
+    O -->|R2DBC| DB[(db_orders)]
+    O -->|CloudEvent order-created| K{{Kafka}}
+    K -->|payment-processed| O
+    K -->|stock-failed / stock-released| O
+    O -->|CloudEvent order-confirmed / order-cancelled| K
+    S[Secrets Manager] -.-> O
 ```
 
-:::note Rol en la SAGA
-`ms-orders` actúa como el **iniciador**: crea la orden con estado `PENDING`, publica `OrderCreatedEvent`, y espera los eventos de resultado (`PaymentProcessedEvent` o `PaymentFailedEvent`) para confirmar o cancelar.
+:::note Importante
+Este módulo queda alineado con el repo funcional de referencia (`arka-kafka-ddd-lab-1/ms-orders`).
 :::
 
 ## 6.1 Prerequisitos
 
-1. ✅ El ms-orders del **Módulo 5** está funcionando con healthcheck
-2. ✅ La infraestructura está corriendo (`docker compose ps`)
-3. ✅ Los secretos del **Módulo 3** están creados en Secrets Manager
+1. El Módulo 5 (`ms-orders` base) ya responde healthcheck.
+2. Infra levantada (`docker compose ps`) con PostgreSQL, Kafka y LocalStack.
+3. Secretos creados en LocalStack:
 
-## 6.2 Agregar adaptadores con el Scaffold
+- `dev/arka/db-orders-creds`
+- `dev/arka/kafka-config`
 
-Desde la carpeta `ms-orders/`:
+## 6.1.1 Recap rápido (Módulos 1 a 3)
 
-```bash
-# Adaptador de Secrets Manager (lee credenciales de AWS)
-./gradlew gda --type secrets --secrets-backend aws_secrets_manager
+Antes de continuar con la implementación de `ms-orders`, confirma que tu base técnica quedó así:
 
-# Adaptador R2DBC (persistencia reactiva con PostgreSQL)
-./gradlew gda --type r2dbc
+### `.env` mínimo esperado
+
+```bash title=".env"
+POSTGRES_USER=arka
+POSTGRES_PASSWORD=arkaSecret2025
+POSTGRES_ORDERS_PORT=5432
+POSTGRES_ORDERS_DB=db_orders
+POSTGRES_INVENTORY_PORT=5433
+POSTGRES_INVENTORY_DB=db_inventory
+POSTGRES_PAYMENT_PORT=5434
+POSTGRES_PAYMENT_DB=db_payment
+KAFKA_PORT=9092
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+LOCALSTACK_PORT=4566
+LOCALSTACK_HOST=arka-localstack
+MS_ORDERS_PORT=8081
+MS_ORDERS_HOST=arka-ms-orders
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_REGION=us-east-1
 ```
 
-:::caution Eliminar los tests autogenerados
-Cada `gda` genera tests que fallarán con nuestras personalizaciones:
+### `compose.yaml` (puntos críticos)
+
+Usa este bloque mínimo (o verifica que el tuyo sea equivalente):
+
+```yaml title="compose.yaml (fragmento necesario)"
+services:
+  kafka:
+    image: confluentinc/cp-kafka:8.0.4
+    container_name: arka-kafka
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  kafka-init:
+    image: confluentinc/cp-kafka:8.0.4
+    container_name: arka-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-created --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-reserved --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-released --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-processed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-failed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-confirmed --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-cancelled --partitions 3 --replication-factor 1
+      "
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: arka-localstack
+    env_file:
+      - .env
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./localstack/infra.yaml:/etc/localstack/init/ready.d/infra.yaml
+      - ./localstack/bootstrap.sh:/etc/localstack/init/ready.d/bootstrap.sh
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  ms-orders:
+    build:
+      context: ./ms-orders
+      dockerfile: deployment/Dockerfile
+      args:
+        - PORT=${MS_ORDERS_PORT}
+    container_name: arka-ms-orders
+    env_file:
+      - .env
+    depends_on:
+      postgres-orders:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MS_ORDERS_PORT}/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+```
+
+### CloudFormation / secretos
+
+En `localstack/infra.yaml`, el secreto `dev/arka/kafka-config` debe incluir `stockFailed` además de los otros topics:
+
+```yaml title="localstack/infra.yaml (fragmento rKafkaSecret)"
+rKafkaSecret:
+  Type: AWS::SecretsManager::Secret
+  Properties:
+    Name: !Sub "${pEnvironment}/arka/kafka-config"
+    SecretString: !Sub |
+      {
+        "bootstrapServers": "${pKafkaBootstrapServers}",
+        "groupId": "arka-saga-group",
+        "autoOffsetReset": "earliest",
+        "topics": {
+          "orderCreated": "order-created",
+          "stockReserved": "stock-reserved",
+          "stockReleased": "stock-released",
+          "paymentProcessed": "payment-processed",
+          "paymentFailed": "payment-failed",
+          "orderConfirmed": "order-confirmed",
+          "orderCancelled": "order-cancelled",
+          "stockFailed": "stock-failed"
+        }
+      }
+```
+
+### Comandos de verificación express
 
 ```bash
-find . -path "*/src/test/*" -name "*.java" -delete
+docker compose up -d
+docker compose ps
+
+awslocal secretsmanager get-secret-value \
+  --secret-id dev/arka/kafka-config \
+  --region us-east-1 \
+  --query SecretString --output text | python3 -m json.tool
 ```
-:::
 
-## 6.3 Definir los eventos de la SAGA
+Si todo eso está correcto, puedes continuar con este módulo sin fricción.
 
-Estos records representan el **contrato de comunicación** entre todos los microservicios. Los definimos en el dominio de ms-orders y los duplicaremos en los otros servicios.
+## 6.2 Estructura esperada en ms-orders
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/OrderCreatedEvent.java"
+Además de `reactive-web` y `r2dbc-postgresql`, este módulo usa dos piezas de mensajería:
+
+- `infrastructure/driven-adapters/async-event-bus` (publicar eventos)
+- `infrastructure/entry-points/async-event-handler` (consumir eventos)
+
+Si no las tienes en tu proyecto actual, puedes generarlas con el scaffold de EDA y luego ajustar paquetes/nombres para que coincidan con esta guía.
+
+## 6.3 Eventos del dominio
+
+Crea estos records en `domain/model/src/main/java/co/com/arka/orders/model/events/`:
+
+```java title="OrderCreatedEvent.java"
 package co.com.arka.orders.model.events;
 
 public record OrderCreatedEvent(
-    String orderId,
-    String sku,
-    Integer quantity,
-    Double amount
-) {}
+        String orderId,
+        String sku,
+        Integer quantity,
+        Double amount
+) {
+}
 ```
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/StockReservedEvent.java"
+```java title="StockReserveFailedEvent.java"
 package co.com.arka.orders.model.events;
 
-public record StockReservedEvent(String orderId, String sku) {}
+public record StockReserveFailedEvent(String orderId, String reason) {
+}
 ```
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/StockReserveFailedEvent.java"
+```java title="StockReleasedEvent.java"
 package co.com.arka.orders.model.events;
 
-public record StockReserveFailedEvent(String orderId, String reason) {}
+public record StockReleasedEvent(String orderId, String reason) {
+}
 ```
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/PaymentProcessedEvent.java"
+```java title="PaymentProcessedEvent.java"
 package co.com.arka.orders.model.events;
 
-public record PaymentProcessedEvent(String orderId) {}
+public record PaymentProcessedEvent(String orderId) {
+}
 ```
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/PaymentFailedEvent.java"
+```java title="OrderConfirmedEvent.java"
 package co.com.arka.orders.model.events;
 
-public record PaymentFailedEvent(String orderId, String reason) {}
+public record OrderConfirmedEvent(String orderId) {
+}
 ```
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/OrderConfirmedEvent.java"
-package co.com.arka.orders.model.events;
-
-public record OrderConfirmedEvent(String orderId) {}
-```
-
-```java title="domain/model/src/main/java/co/com/arka/orders/model/events/OrderCancelledEvent.java"
+```java title="OrderCancelledEvent.java"
 package co.com.arka.orders.model.events;
 
 public record OrderCancelledEvent(String orderId, String reason) {}
 ```
 
-## 6.4 Modelo de Dominio — Order
+## 6.4 Modelo de dominio y puertos
+
+### 6.4.1 Entidad `Order`
 
 ```java title="domain/model/src/main/java/co/com/arka/orders/model/order/Order.java"
 package co.com.arka.orders.model.order;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder(toBuilder = true)
 public class Order {
     private String id;
     private String customerId;
@@ -136,7 +265,7 @@ public class Order {
 }
 ```
 
-### Puerto del Repositorio
+### 6.4.2 Repositorio
 
 ```java title="domain/model/src/main/java/co/com/arka/orders/model/order/gateways/OrderRepository.java"
 package co.com.arka.orders.model.order.gateways;
@@ -152,65 +281,28 @@ public interface OrderRepository {
 }
 ```
 
-### Puerto del Publicador de Eventos
+### 6.4.3 Gateway genérico de eventos
 
-```java title="domain/model/src/main/java/co/com/arka/orders/model/order/gateways/OrderEventPublisher.java"
-package co.com.arka.orders.model.order.gateways;
+```java title="domain/model/src/main/java/co/com/arka/orders/model/events/gateways/EventsGateway.java"
+package co.com.arka.orders.model.events.gateways;
 
-import co.com.arka.orders.model.events.OrderCreatedEvent;
 import reactor.core.publisher.Mono;
 
-public interface OrderEventPublisher {
-    Mono<Void> publishOrderCreated(OrderCreatedEvent event);
+public interface EventsGateway<T> {
+    Mono<Void> emit(T event);
 }
 ```
 
-## 6.5 Modelo del secreto — BrokerSecret
-
-Reutilizamos el mismo patrón del Módulo 4 para leer la configuración de Kafka:
-
-```java title="domain/model/src/main/java/co/com/arka/orders/model/brokersecret/BrokerSecret.java"
-package co.com.arka.orders.model.brokersecret;
-
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class BrokerSecret {
-    private String bootstrapServers;
-    private String groupId;
-    private String autoOffsetReset;
-    private Topics topics;
-    
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class Topics {
-        private String orderCreated;
-        private String stockReserved;
-        private String stockReleased;
-        private String stockFailed;
-        private String paymentProcessed;
-        private String paymentFailed;
-        private String orderConfirmed;
-        private String orderCancelled;
-    }
-}
-```
-
-## 6.6 Caso de Uso — OrderUseCase
+## 6.5 Caso de uso `OrderUseCase`
 
 ```java title="domain/usecase/src/main/java/co/com/arka/orders/usecase/order/OrderUseCase.java"
 package co.com.arka.orders.usecase.order;
 
+import co.com.arka.orders.model.events.OrderCancelledEvent;
+import co.com.arka.orders.model.events.OrderConfirmedEvent;
 import co.com.arka.orders.model.events.OrderCreatedEvent;
+import co.com.arka.orders.model.events.gateways.EventsGateway;
 import co.com.arka.orders.model.order.Order;
-import co.com.arka.orders.model.order.gateways.OrderEventPublisher;
 import co.com.arka.orders.model.order.gateways.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
@@ -218,40 +310,49 @@ import reactor.core.publisher.Mono;
 
 @RequiredArgsConstructor
 public class OrderUseCase {
-
     private final OrderRepository orderRepository;
-    private final OrderEventPublisher eventPublisher;
+    private final EventsGateway<OrderCreatedEvent> orderCreatedEventEventsPublisher;
+    private final EventsGateway<OrderCancelledEvent> orderCancelledEventEventsPublisher;
+    private final EventsGateway<OrderConfirmedEvent> orderConfirmedEventEventsPublisher;
 
-    // highlight-start
     public Mono<Order> createOrder(Order order) {
         order.setStatus("PENDING");
         order.setTotalAmount(order.getUnitPrice() * order.getQuantity());
         return orderRepository.save(order)
-            .flatMap(saved -> {
-                var event = new OrderCreatedEvent(
-                    saved.getId(), saved.getSku(),
-                    saved.getQuantity(), saved.getTotalAmount()
-                );
-                return eventPublisher.publishOrderCreated(event)
-                    .thenReturn(saved);
-            });
+                .flatMap(saved -> {
+                    var event = new OrderCreatedEvent(
+                            saved.getId(), saved.getSku(),
+                            saved.getQuantity(), saved.getTotalAmount()
+                    );
+                    return orderCreatedEventEventsPublisher.emit(event)
+                            .thenReturn(saved);
+                });
     }
-    // highlight-end
 
     public Mono<Order> confirmOrder(String orderId) {
         return orderRepository.findById(orderId)
-            .flatMap(order -> {
-                order.setStatus("CONFIRMED");
-                return orderRepository.save(order);
-            });
+                .flatMap(order -> {
+                    order.setStatus("CONFIRMED");
+                    return orderRepository.save(order)
+                            .flatMap(orderConfirmed -> {
+                                var event = new OrderConfirmedEvent(orderConfirmed.getId());
+                                return orderConfirmedEventEventsPublisher.emit(event)
+                                        .thenReturn(orderConfirmed);
+                            });
+                });
     }
 
     public Mono<Order> cancelOrder(String orderId, String reason) {
         return orderRepository.findById(orderId)
-            .flatMap(order -> {
-                order.setStatus("CANCELLED");
-                return orderRepository.save(order);
-            });
+                .flatMap(order -> {
+                    order.setStatus("CANCELLED");
+                    return orderRepository.save(order)
+                            .flatMap(orderCancelled -> {
+                                var event = new OrderCancelledEvent(orderCancelled.getId(), reason);
+                                return orderCancelledEventEventsPublisher.emit(event)
+                                        .thenReturn(orderCancelled);
+                            });
+                });
     }
 
     public Mono<Order> getOrder(String id) {
@@ -264,70 +365,412 @@ public class OrderUseCase {
 }
 ```
 
-:::info Patrón Outbox Simplificado
-`createOrder()` guarda en BD y publica a Kafka en secuencia. En producción usarías un **Transactional Outbox** para garantizar atomicidad. Para el lab, asumimos que la infraestructura es confiable.
-:::
+## 6.6 Secrets Manager (db + kafka)
 
-## 6.7 Infraestructura — Secrets Manager Config
-
-Mismo patrón que la POC del Módulo 4:
+### 6.6.1 Configuración de secretos
 
 ```java title="applications/app-service/src/main/java/co/com/arka/orders/config/SecretsConfig.java"
 package co.com.arka.orders.config;
 
-import co.com.bancolombia.commons.secretsmanager.connector.clients.connector.AWSSecretManagerConnectorAsync;
-import co.com.bancolombia.commons.secretsmanager.manager.GenericManagerAsync;
-import co.com.arka.orders.model.brokersecret.BrokerSecret;
+import co.com.arka.orders.events.config.KafkaBrokerSecretConsumer;
+import co.com.arka.orders.events.config.KafkaBrokerSecretProducer;
 import co.com.arka.orders.r2dbc.config.PostgresqlConnectionProperties;
+import co.com.bancolombia.secretsmanager.api.GenericManagerAsync;
+import co.com.bancolombia.secretsmanager.api.exceptions.SecretException;
+import co.com.bancolombia.secretsmanager.config.AWSSecretsManagerConfig;
+import co.com.bancolombia.secretsmanager.connector.AWSSecretManagerConnectorAsync;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import reactor.core.publisher.Mono;
 import software.amazon.awssdk.regions.Region;
 
-import java.net.URI;
-
+@Slf4j
 @Configuration
 public class SecretsConfig {
 
-    @Value("${aws.endpoint}")
-    private String awsEndpoint;
+  @Value("${aws.secrets.db-name}")
+  private String dbSecretName;
+  @Value("${aws.secrets.kafka-name}")
+  private String kafkaSecretName;
 
-    @Value("${aws.region}")
-    private String awsRegion;
+  @Bean
+  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region,
+                                              @Value("${aws.endpoint}") String endpoint) {
+    return new AWSSecretManagerConnectorAsync(getConfig(region, endpoint));
+  }
 
-    @Value("${aws.secrets.db-name}")
-    private String dbSecretName;
+  private AWSSecretsManagerConfig getConfig(String region, String endpoint) {
+    return AWSSecretsManagerConfig.builder()
+      .region(Region.of(region))
+      .endpoint(endpoint)
+      .cacheSize(5)
+      .cacheSeconds(3600)
+      .build();
+  }
 
-    @Value("${aws.secrets.kafka-name}")
-    private String kafkaSecretName;
+  private <T> Mono<T> getSecret(String secretName, Class<T> cls, GenericManagerAsync connector) throws SecretException {
+    return connector.getSecret(secretName, cls)
+            .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", secretName))
+            .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
+            .onErrorMap(e -> new RuntimeException("Error getting secret", e));
+  }
 
-    private GenericManagerAsync manager() {
-        return new GenericManagerAsync(
-            new AWSSecretManagerConnectorAsync(
-                Region.of(awsRegion),
-                URI.create(awsEndpoint),
-                DefaultCredentialsProvider.create()
-            )
-        );
-    }
+  @Bean
+  public KafkaBrokerSecretProducer brokerSecretProducer(GenericManagerAsync connector) throws SecretException {
+    return getSecret(kafkaSecretName, KafkaBrokerSecretProducer.class, connector).block();
+  }
 
-    @Bean
-    public PostgresqlConnectionProperties postgresqlConnectionProperties() {
-        return manager().getSecret(dbSecretName, PostgresqlConnectionProperties.class).block();
-    }
+  @Bean
+  public KafkaBrokerSecretConsumer brokerSecretConsumer(GenericManagerAsync connector) throws SecretException {
+    return getSecret(kafkaSecretName, KafkaBrokerSecretConsumer.class, connector).block();
+  }
 
-    @Bean
-    public BrokerSecret brokerSecret() {
-        return manager().getSecret(kafkaSecretName, BrokerSecret.class).block();
+  @Bean
+  public PostgresqlConnectionProperties postgresqlSecret(GenericManagerAsync connector) throws SecretException {
+    return getSecret(dbSecretName, PostgresqlConnectionProperties.class, connector).block();
+  }
+}
+```
+
+### 6.6.2 Secretos tipados para Kafka
+
+```java title="infrastructure/driven-adapters/async-event-bus/src/main/java/co/com/arka/orders/events/config/KafkaBrokerSecretProducer.java"
+package co.com.arka.orders.events.config;
+
+import lombok.Builder;
+
+@Builder(toBuilder = true)
+public record KafkaBrokerSecretProducer(
+        String bootstrapServers,
+        String groupId,
+        String autoOffsetReset,
+        Topics topics) {
+    @Builder(toBuilder = true)
+    public record Topics(
+            String orderCreated,
+            String stockReserved,
+            String stockReleased,
+            String stockFailed,
+            String paymentProcessed,
+            String paymentFailed,
+            String orderConfirmed,
+            String orderCancelled
+    ) {}
+}
+```
+
+```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/orders/events/config/KafkaBrokerSecretConsumer.java"
+package co.com.arka.orders.events.config;
+
+import lombok.Builder;
+
+@Builder(toBuilder = true)
+public record KafkaBrokerSecretConsumer(
+        String bootstrapServers,
+        String groupId,
+        String autoOffsetReset,
+        Topics topics) {
+    @Builder(toBuilder = true)
+    public record Topics(
+            String orderCreated,
+            String stockReserved,
+            String stockReleased,
+            String stockFailed,
+            String paymentProcessed,
+            String paymentFailed,
+            String orderConfirmed,
+            String orderCancelled
+    ) {}
+}
+```
+
+## 6.7 Publicación de eventos (async-event-bus)
+
+Dependencias del módulo:
+
+```groovy title="infrastructure/driven-adapters/async-event-bus/build.gradle"
+dependencies {
+    implementation project(':model')
+    implementation 'io.cloudevents:cloudevents-core:4.0.1'
+    implementation 'org.reactivecommons:async-kafka-starter:7.0.3'
+    implementation 'org.springframework:spring-context'
+}
+```
+
+Implementa los 3 gateways:
+
+### 6.7.1 `OrderCreatedEventGateway`
+
+```java title=".../events/OrderCreatedEventGateway.java"
+package co.com.arka.orders.events;
+
+import co.com.arka.orders.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.orders.model.events.OrderCreatedEvent;
+import co.com.arka.orders.model.events.gateways.EventsGateway;
+import io.cloudevents.CloudEvent;
+import io.cloudevents.core.builder.CloudEventBuilder;
+import io.cloudevents.jackson.JsonCloudEventData;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.api.domain.DomainEventBus;
+import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.ObjectMapper;
+
+import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+import java.util.logging.Level;
+
+import static reactor.core.publisher.Mono.from;
+
+@Log
+@RequiredArgsConstructor
+@EnableDomainEventBus
+public class OrderCreatedEventGateway implements EventsGateway<OrderCreatedEvent> {
+    private final KafkaBrokerSecretProducer brokerSecret;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(OrderCreatedEvent event) {
+        String eventName = brokerSecret.topics().orderCreated();
+        log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+        CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+                .withId(UUID.randomUUID().toString())
+                .withSource(URI.create("https://reactive-commons.org/foos"))
+                .withType(eventName)
+                .withTime(OffsetDateTime.now())
+                .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+                .build();
+
+         return from(domainEventBus.emit(eventCloudEvent));
     }
 }
 ```
 
-## 6.8 Infraestructura — R2DBC (Persistencia)
+### 6.7.2 `OrderConfirmedEventGateway`
 
-### Entidad
+```java title=".../events/OrderConfirmedEventGateway.java"
+package co.com.arka.orders.events;
+
+import co.com.arka.orders.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.orders.model.events.OrderConfirmedEvent;
+import co.com.arka.orders.model.events.gateways.EventsGateway;
+import io.cloudevents.CloudEvent;
+import io.cloudevents.core.builder.CloudEventBuilder;
+import io.cloudevents.jackson.JsonCloudEventData;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.api.domain.DomainEventBus;
+import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.ObjectMapper;
+
+import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+import java.util.logging.Level;
+
+import static reactor.core.publisher.Mono.from;
+
+@Log
+@RequiredArgsConstructor
+@EnableDomainEventBus
+public class OrderConfirmedEventGateway implements EventsGateway<OrderConfirmedEvent> {
+    private final KafkaBrokerSecretProducer brokerSecret;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(OrderConfirmedEvent event) {
+        String eventName = brokerSecret.topics().orderConfirmed();
+        log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+        CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+                .withId(UUID.randomUUID().toString())
+                .withSource(URI.create("https://reactive-commons.org/foos"))
+                .withType(eventName)
+                .withTime(OffsetDateTime.now())
+                .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+                .build();
+
+        return from(domainEventBus.emit(eventCloudEvent));
+    }
+}
+```
+
+### 6.7.3 `OrderCancelledEventGateway`
+
+```java title=".../events/OrderCancelledEventGateway.java"
+package co.com.arka.orders.events;
+
+import co.com.arka.orders.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.orders.model.events.OrderCancelledEvent;
+import co.com.arka.orders.model.events.gateways.EventsGateway;
+import io.cloudevents.CloudEvent;
+import io.cloudevents.core.builder.CloudEventBuilder;
+import io.cloudevents.jackson.JsonCloudEventData;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.api.domain.DomainEventBus;
+import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.ObjectMapper;
+
+import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+import java.util.logging.Level;
+
+import static reactor.core.publisher.Mono.from;
+
+@Log
+@RequiredArgsConstructor
+@EnableDomainEventBus
+public class OrderCancelledEventGateway implements EventsGateway<OrderCancelledEvent> {
+    private final KafkaBrokerSecretProducer brokerSecret;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(OrderCancelledEvent event) {
+        String eventName = brokerSecret.topics().orderCancelled();
+        log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+        CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+                .withId(UUID.randomUUID().toString())
+                .withSource(URI.create("https://reactive-commons.org/foos"))
+                .withType(eventName)
+                .withTime(OffsetDateTime.now())
+                .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+                .build();
+
+        return from(domainEventBus.emit(eventCloudEvent));
+    }
+}
+```
+
+## 6.8 Consumo de eventos (async-event-handler)
+
+Dependencias del módulo:
+
+```groovy title="infrastructure/entry-points/async-event-handler/build.gradle"
+dependencies {
+    implementation project(':model')
+    implementation project(':usecase')
+    implementation 'io.cloudevents:cloudevents-core:4.0.1'
+    implementation 'org.reactivecommons:async-kafka-starter:7.0.3'
+    implementation 'org.reactivecommons.utils:object-mapper:0.1.0'
+    implementation 'org.springframework:spring-context'
+    implementation 'io.micrometer:micrometer-core'
+}
+```
+
+### 6.8.1 Handler de eventos
+
+```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/orders/events/handlers/EventsHandler.java"
+package co.com.arka.orders.events.handlers;
+
+import co.com.arka.orders.model.events.PaymentProcessedEvent;
+import co.com.arka.orders.model.events.StockReleasedEvent;
+import co.com.arka.orders.model.events.StockReserveFailedEvent;
+import co.com.arka.orders.usecase.order.OrderUseCase;
+import io.cloudevents.CloudEvent;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.async.impl.config.annotations.EnableEventListeners;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.Optional;
+import java.util.logging.Level;
+
+@Log
+@RequiredArgsConstructor
+@EnableEventListeners
+public class EventsHandler {
+
+    private final OrderUseCase orderUseCase;
+    private final ObjectMapper objectMapper;
+
+    public Mono<Void> handleStockFailedEvent(CloudEvent event) {
+        Optional<StockReserveFailedEvent> stockReserveFailedEvent = deserialize(event, StockReserveFailedEvent.class);
+
+        return Mono.justOrEmpty(stockReserveFailedEvent)
+                .doOnNext(st -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), st}))
+                .flatMap(st -> orderUseCase.cancelOrder(st.orderId(), "Out of stock: " + st.reason()))
+                .doOnNext(order -> log.info("Order: " + order.getId() + " cancelled due to stock failure"))
+                .then();
+    }
+
+    public Mono<Void> handleStockReleasedEvent(CloudEvent event) {
+        Optional<StockReleasedEvent> stockReleasedEvent = deserialize(event, StockReleasedEvent.class);
+
+        return Mono.justOrEmpty(stockReleasedEvent)
+                .doOnNext(st -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), st}))
+                .flatMap(st -> orderUseCase.cancelOrder(st.orderId(), "Failed: " + st.reason()))
+                .doOnNext(order -> log.info("Order: " + order.getId() + " cancelled"))
+                .then();
+    }
+
+    public Mono<Void> handlePaymentProcessedEvent(CloudEvent event) {
+        Optional<PaymentProcessedEvent> paymentProcessedEvent = deserialize(event, PaymentProcessedEvent.class);
+
+        return Mono.justOrEmpty(paymentProcessedEvent)
+                .doOnNext(st -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), st}))
+                .flatMap(st -> orderUseCase.confirmOrder(st.orderId()))
+                .doOnNext(order -> log.info("Order: " + order.getId() + " confirm after payment"))
+                .then();
+    }
+
+    private <T> Optional<T> deserialize(CloudEvent event, Class<T> clazz) {
+        if (event == null || event.getData() == null) {
+            log.warning("Received event with empty data");
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(objectMapper.readValue(event.getData().toBytes(), clazz));
+        } catch (Exception e) {
+            log.log(Level.SEVERE, "Failed to deserialize event data to " + clazz.getSimpleName(), e);
+            throw new RuntimeException("Failed to map event data", e);
+        }
+    }
+}
+```
+
+### 6.8.2 Registro de listeners
+
+```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/orders/events/HandlerRegistryConfiguration.java"
+package co.com.arka.orders.events;
+
+import co.com.arka.orders.events.config.KafkaBrokerSecretConsumer;
+import co.com.arka.orders.events.handlers.EventsHandler;
+import lombok.RequiredArgsConstructor;
+import org.reactivecommons.async.api.HandlerRegistry;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+@RequiredArgsConstructor
+public class HandlerRegistryConfiguration {
+
+    private final KafkaBrokerSecretConsumer kafkaBrokerSecretConsumer;
+
+    @Bean
+    public HandlerRegistry handlerRegistry(EventsHandler events) {
+        return HandlerRegistry.register()
+                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().stockFailed(), events::handleStockFailedEvent)
+                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().stockReleased(), events::handleStockReleasedEvent)
+                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().paymentProcessed(), events::handlePaymentProcessedEvent);
+    }
+}
+```
+
+## 6.9 Persistencia R2DBC
+
+### 6.9.1 Entidad
 
 ```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/orders/r2dbc/entity/OrderData.java"
 package co.com.arka.orders.r2dbc.entity;
@@ -350,13 +793,12 @@ public class OrderData {
     private String customerId;
     private String sku;
     private Integer quantity;
-    private Double unitPrice;
     private Double totalAmount;
     private String status;
 }
 ```
 
-### Repository
+### 6.9.2 Repository reactivo
 
 ```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/orders/r2dbc/OrderReactiveRepository.java"
 package co.com.arka.orders.r2dbc;
@@ -368,7 +810,7 @@ public interface OrderReactiveRepository extends ReactiveCrudRepository<OrderDat
 }
 ```
 
-### Adapter
+### 6.9.3 Adapter
 
 ```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/orders/r2dbc/OrderReactiveRepositoryAdapter.java"
 package co.com.arka.orders.r2dbc;
@@ -379,38 +821,42 @@ import co.com.arka.orders.r2dbc.entity.OrderData;
 import co.com.arka.orders.r2dbc.helper.ReactiveAdapterOperations;
 import org.reactivecommons.utils.ObjectMapper;
 import org.springframework.stereotype.Repository;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 @Repository
-public class OrderReactiveRepositoryAdapter 
-    extends ReactiveAdapterOperations<Order, OrderData, String, OrderReactiveRepository> 
-    implements OrderRepository {
-
-    public OrderReactiveRepositoryAdapter(
-            OrderReactiveRepository repository, ObjectMapper mapper) {
-        super(repository, mapper, d -> mapper.map(d, Order.class));
-    }
-
-    @Override
-    public Mono<Order> save(Order order) {
-        return super.save(order);
-    }
-
-    @Override
-    public Mono<Order> findById(String id) {
-        return super.findById(id);
-    }
-
-    @Override
-    public Flux<Order> findAll() {
-        return repository.findAll()
-            .map(data -> mapper.map(data, Order.class));
+public class OrderReactiveRepositoryAdapter extends ReactiveAdapterOperations<
+    Order,
+    OrderData,
+    String,
+    OrderReactiveRepository
+> implements OrderRepository {
+    public OrderReactiveRepositoryAdapter(OrderReactiveRepository repository, ObjectMapper mapper) {
+        super(repository,
+                orderData -> mapper.map(orderData, Order.class),
+                order -> OrderData.builder()
+                        .id(order.getId())
+                        .customerId(order.getCustomerId())
+                        .sku(order.getSku())
+                        .quantity(order.getQuantity())
+                        .totalAmount(order.getTotalAmount())
+                        .status(order.getStatus())
+                        .build());
     }
 }
 ```
 
-### Connection Pool (Secrets Manager → R2DBC)
+### 6.9.4 Connection Pool con secreto
+
+```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/orders/r2dbc/config/PostgresqlConnectionProperties.java"
+package co.com.arka.orders.r2dbc.config;
+
+public record PostgresqlConnectionProperties(
+        String host,
+        Integer port,
+        String database,
+        String username,
+        String password) {
+}
+```
 
 ```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/orders/r2dbc/config/PostgreSQLConnectionPool.java"
 package co.com.arka.orders.r2dbc.config;
@@ -419,247 +865,52 @@ import io.r2dbc.pool.ConnectionPool;
 import io.r2dbc.pool.ConnectionPoolConfiguration;
 import io.r2dbc.postgresql.PostgresqlConnectionConfiguration;
 import io.r2dbc.postgresql.PostgresqlConnectionFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+
+@Slf4j
 @Configuration
 public class PostgreSQLConnectionPool {
+    public static final int INITIAL_SIZE = 12;
+    public static final int MAX_SIZE = 15;
+    public static final int MAX_IDLE_TIME = 30;
 
     @Bean
-    public ConnectionPool connectionPool(PostgresqlConnectionProperties props) {
-        PostgresqlConnectionConfiguration dbConfig = PostgresqlConnectionConfiguration.builder()
-            .host(props.host())
-            .port(props.port())
-            .database(props.database())
-            .username(props.username())
-            .password(props.password())
-            .build();
+    public ConnectionPool getConnectionConfig(PostgresqlConnectionProperties properties) {
+        log.info("Creating connection pool configuration. Host: {}, Port: {}, Database: {}, Username: {}",
+                properties.host(),
+                properties.port(),
+                properties.database(),
+                properties.username());
 
-        ConnectionPoolConfiguration poolConfig = ConnectionPoolConfiguration.builder()
-            .connectionFactory(new PostgresqlConnectionFactory(dbConfig))
-            .build();
+        PostgresqlConnectionConfiguration dbConfiguration = PostgresqlConnectionConfiguration.builder()
+                .host(properties.host())
+                .port(properties.port())
+                .database(properties.database())
+                .username(properties.username())
+                .password(properties.password())
+                .build();
 
-        return new ConnectionPool(poolConfig);
+        ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder()
+                .connectionFactory(new PostgresqlConnectionFactory(dbConfiguration))
+                .name("api-postgres-connection-pool")
+                .initialSize(INITIAL_SIZE)
+                .maxSize(MAX_SIZE)
+                .maxIdleTime(Duration.ofMinutes(MAX_IDLE_TIME))
+                .validationQuery("SELECT 1")
+                .build();
+
+        return new ConnectionPool(poolConfiguration);
     }
 }
 ```
 
-:::info Las credenciales vienen de Secrets Manager
-`PostgresqlConnectionProperties` se crea en `SecretsConfig` leyendo el secreto `dev/arka/db-orders-creds`. Las credenciales **nunca** aparecen en `application.yaml`.
-:::
+## 6.10 API REST (reactive-web)
 
-## 6.9 Infraestructura — Kafka Producer
-
-Agregamos las dependencias de reactor-kafka y configuramos el producer:
-
-### Dependencia
-
-```groovy title="infrastructure/driven-adapters/r2dbc-postgresql/build.gradle (o un módulo nuevo)"
-// Agregar en el build.gradle del módulo infrastructure/entry-points/reactive-web
-dependencies {
-    // ... existing deps
-    implementation 'io.projectreactor.kafka:reactor-kafka:1.3.23'
-    implementation 'org.apache.kafka:kafka-clients:3.9.0'
-    implementation 'com.fasterxml.jackson.core:jackson-databind'
-}
-```
-
-:::tip Simplificación
-Para este lab, agregamos las dependencias de Kafka en el build.gradle del entry-point `reactive-web`. En producción, crearías un módulo driven-adapter separado para Kafka.
-:::
-
-### Configuración del Producer
-
-```java title="applications/app-service/src/main/java/co/com/arka/orders/config/KafkaProducerConfig.java"
-package co.com.arka.orders.config;
-
-import co.com.arka.orders.model.brokersecret.BrokerSecret;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderOptions;
-
-import java.util.HashMap;
-import java.util.Map;
-
-@Configuration
-public class KafkaProducerConfig {
-
-    @Bean
-    public KafkaSender<String, String> kafkaSender(BrokerSecret brokerSecret) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerSecret.getBootstrapServers());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        
-        SenderOptions<String, String> senderOptions = SenderOptions.create(props);
-        return KafkaSender.create(senderOptions);
-    }
-}
-```
-
-### Implementación del Publisher
-
-```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/orders/api/kafka/OrderKafkaPublisher.java"
-package co.com.arka.orders.api.kafka;
-
-import co.com.arka.orders.model.brokersecret.BrokerSecret;
-import co.com.arka.orders.model.events.OrderCreatedEvent;
-import co.com.arka.orders.model.order.gateways.OrderEventPublisher;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.springframework.stereotype.Component;
-import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
-
-@Slf4j
-@Component
-@RequiredArgsConstructor
-public class OrderKafkaPublisher implements OrderEventPublisher {
-
-    private final KafkaSender<String, String> kafkaSender;
-    private final BrokerSecret brokerSecret;
-    private final ObjectMapper objectMapper;
-
-    @Override
-    public Mono<Void> publishOrderCreated(OrderCreatedEvent event) {
-        String topic = brokerSecret.getTopics().getOrderCreated();
-        return sendEvent(topic, event.orderId(), event);
-    }
-
-    private <T> Mono<Void> sendEvent(String topic, String key, T event) {
-        try {
-            String json = objectMapper.writeValueAsString(event);
-            ProducerRecord<String, String> record = new ProducerRecord<>(topic, key, json);
-            return kafkaSender.send(Mono.just(SenderRecord.create(record, key)))
-                .doOnNext(r -> log.info("✅ Evento publicado en [{}]: key={}", topic, key))
-                .then();
-        } catch (JsonProcessingException e) {
-            return Mono.error(e);
-        }
-    }
-}
-```
-
-## 6.10 Infraestructura — Kafka Consumer
-
-El consumer escucha los eventos de resultado de la SAGA:
-
-### Configuración del Consumer
-
-```java title="applications/app-service/src/main/java/co/com/arka/orders/config/KafkaConsumerConfig.java"
-package co.com.arka.orders.config;
-
-import co.com.arka.orders.model.brokersecret.BrokerSecret;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import reactor.kafka.receiver.KafkaReceiver;
-import reactor.kafka.receiver.ReceiverOptions;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-@Configuration
-public class KafkaConsumerConfig {
-
-    @Bean
-    public KafkaReceiver<String, String> kafkaReceiver(BrokerSecret brokerSecret) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerSecret.getBootstrapServers());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "orders-group");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, brokerSecret.getAutoOffsetReset());
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-
-        ReceiverOptions<String, String> options = ReceiverOptions.<String, String>create(props)
-            .subscription(List.of(
-                brokerSecret.getTopics().getPaymentProcessed(),
-                brokerSecret.getTopics().getPaymentFailed(),
-                brokerSecret.getTopics().getStockFailed()
-            ));
-
-        return KafkaReceiver.create(options);
-    }
-}
-```
-
-### Listener de eventos
-
-```java title="applications/app-service/src/main/java/co/com/arka/orders/config/OrderSagaListener.java"
-package co.com.arka.orders.config;
-
-import co.com.arka.orders.model.brokersecret.BrokerSecret;
-import co.com.arka.orders.model.events.PaymentFailedEvent;
-import co.com.arka.orders.model.events.PaymentProcessedEvent;
-import co.com.arka.orders.model.events.StockReserveFailedEvent;
-import co.com.arka.orders.usecase.order.OrderUseCase;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-import reactor.kafka.receiver.KafkaReceiver;
-
-@Slf4j
-@Component
-@RequiredArgsConstructor
-public class OrderSagaListener {
-
-    private final KafkaReceiver<String, String> kafkaReceiver;
-    private final OrderUseCase orderUseCase;
-    private final BrokerSecret brokerSecret;
-    private final ObjectMapper objectMapper;
-
-    @PostConstruct
-    public void startListening() {
-        kafkaReceiver.receive()
-            .doOnNext(record -> {
-                String topic = record.topic();
-                String value = record.value();
-                log.info("📨 Evento recibido de [{}]: {}", topic, value);
-
-                try {
-                    if (topic.equals(brokerSecret.getTopics().getPaymentProcessed())) {
-                        var event = objectMapper.readValue(value, PaymentProcessedEvent.class);
-                        orderUseCase.confirmOrder(event.orderId())
-                            .doOnSuccess(o -> log.info("✅ Orden {} CONFIRMADA", o.getId()))
-                            .subscribe();
-                    } else if (topic.equals(brokerSecret.getTopics().getPaymentFailed())) {
-                        var event = objectMapper.readValue(value, PaymentFailedEvent.class);
-                        orderUseCase.cancelOrder(event.orderId(), event.reason())
-                            .doOnSuccess(o -> log.info("🚫 Orden {} CANCELADA: {}", o.getId(), event.reason()))
-                            .subscribe();
-                    } else if (topic.equals(brokerSecret.getTopics().getStockFailed())) {
-                        var event = objectMapper.readValue(value, StockReserveFailedEvent.class);
-                        orderUseCase.cancelOrder(event.orderId(), event.reason())
-                            .doOnSuccess(o -> log.info("🚫 Orden {} CANCELADA (sin stock): {}", o.getId(), event.reason()))
-                            .subscribe();
-                    }
-                } catch (Exception e) {
-                    log.error("Error procesando evento: {}", e.getMessage());
-                }
-
-                record.receiverOffset().acknowledge();
-            })
-            .subscribe();
-    }
-}
-```
-
-## 6.11 Entry Point — REST API
-
-Actualiza el handler y router del Módulo 5:
-
-### Handler actualizado
+### Handler
 
 ```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/orders/api/Handler.java"
 package co.com.arka.orders.api;
@@ -681,7 +932,7 @@ public class Handler {
 
     private final OrderUseCase orderUseCase;
 
-    public Mono<ServerResponse> healthCheck(ServerRequest request) {
+    public Mono<ServerResponse> healthCheck(ServerRequest serverRequest) {
         return ServerResponse.ok().bodyValue(Map.of(
                 "service", "ms-orders",
                 "status", "UP",
@@ -689,26 +940,26 @@ public class Handler {
         ));
     }
 
-    public Mono<ServerResponse> createOrder(ServerRequest request) {
-        return request.bodyToMono(Order.class)
-            .flatMap(orderUseCase::createOrder)
-            .flatMap(order -> ServerResponse.ok().bodyValue(order));
+    public Mono<ServerResponse> createOrder(ServerRequest serverRequest) {
+        return serverRequest.bodyToMono(Order.class)
+                .flatMap(orderUseCase::createOrder)
+                .flatMap(order -> ServerResponse.ok().bodyValue(order));
     }
 
-    public Mono<ServerResponse> getOrder(ServerRequest request) {
-        String id = request.pathVariable("id");
+    public Mono<ServerResponse> getOrder(ServerRequest serverRequest) {
+        String id = serverRequest.pathVariable("id");
         return orderUseCase.getOrder(id)
-            .flatMap(order -> ServerResponse.ok().bodyValue(order))
-            .switchIfEmpty(ServerResponse.notFound().build());
+                .flatMap(order -> ServerResponse.ok().bodyValue(order))
+                .switchIfEmpty(ServerResponse.notFound().build());
     }
 
-    public Mono<ServerResponse> getAllOrders(ServerRequest request) {
+    public Mono<ServerResponse> getAllOrders(ServerRequest serverRequest) {
         return ServerResponse.ok().body(orderUseCase.getAllOrders(), Order.class);
     }
 }
 ```
 
-### Router actualizado
+### Router
 
 ```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/orders/api/RouterRest.java"
 package co.com.arka.orders.api;
@@ -718,7 +969,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerResponse;
 
-import static org.springframework.web.reactive.function.server.RequestPredicates.*;
+import static org.springframework.web.reactive.function.server.RequestPredicates.GET;
+import static org.springframework.web.reactive.function.server.RequestPredicates.POST;
 import static org.springframework.web.reactive.function.server.RouterFunctions.route;
 
 @Configuration
@@ -726,54 +978,73 @@ public class RouterRest {
     @Bean
     public RouterFunction<ServerResponse> routerFunction(Handler handler) {
         return route(GET("/api/health"), handler::healthCheck)
-            .andRoute(POST("/api/orders"), handler::createOrder)
-            .andRoute(GET("/api/orders/{id}"), handler::getOrder)
-            .andRoute(GET("/api/orders"), handler::getAllOrders);
+                .andRoute(POST("/api/orders"), handler::createOrder)
+                .andRoute(GET("/api/orders/{id}"), handler::getOrder)
+                .andRoute(GET("/api/orders"), handler::getAllOrders);
     }
 }
 ```
 
-## 6.12 Configurar los beans — UseCasesConfig
+## 6.11 Beans de aplicación
+
+### `UseCasesConfig`
 
 ```java title="applications/app-service/src/main/java/co/com/arka/orders/config/UseCasesConfig.java"
 package co.com.arka.orders.config;
 
-import co.com.arka.orders.model.order.gateways.OrderEventPublisher;
-import co.com.arka.orders.model.order.gateways.OrderRepository;
-import co.com.arka.orders.usecase.order.OrderUseCase;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
+
+@Configuration
+@ComponentScan(basePackages = "co.com.arka.orders.usecase",
+        includeFilters = {
+                @ComponentScan.Filter(type = FilterType.REGEX, pattern = "^.+UseCase$")
+        },
+        useDefaultFilters = false)
+public class UseCasesConfig {
+}
+```
+
+### `ObjectMapperConfig`
+
+```java title="applications/app-service/src/main/java/co/com/arka/orders/config/ObjectMapperConfig.java"
+package co.com.arka.orders.config;
+
+import org.reactivecommons.utils.ObjectMapper;
+import org.reactivecommons.utils.ObjectMapperImp;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-public class UseCasesConfig {
+public class ObjectMapperConfig {
 
     @Bean
-    public OrderUseCase orderUseCase(OrderRepository repository, OrderEventPublisher publisher) {
-        return new OrderUseCase(repository, publisher);
+    public ObjectMapper objectMapper() {
+        return new ObjectMapperImp();
     }
+
 }
 ```
 
-## 6.13 Configurar `application.yaml`
+## 6.12 application.yaml final
 
 ```yaml title="applications/app-service/src/main/resources/application.yaml"
 server:
-  port: ${MS_ORDERS_PORT:8081}
-
+  port: "${MS_ORDERS_PORT:8081}"
 spring:
   application:
     name: "MsOrders"
   devtools:
     add-properties: false
-
-# ── AWS / LocalStack ──
-aws:
-  endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
-  region: "${AWS_REGION:us-east-1}"
-  secrets:
-    db-name: "dev/arka/db-orders-creds"
-    kafka-name: "dev/arka/kafka-config"
-
+  h2:
+    console:
+      enabled: true
+      path: "/h2"
+  profiles:
+    include: null
+  kafka:
+    bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
 management:
   endpoints:
     web:
@@ -783,32 +1054,41 @@ management:
     health:
       probes:
         enabled: true
-
 cors:
   allowed-origins: "http://localhost:4200,http://localhost:8080"
+aws:
+  endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
+  region: "${AWS_REGION:us-east-1}"
+  secrets:
+    db-name: "${ORDERS_DB_SECRET_NAME:dev/arka/db-orders-creds}"
+    kafka-name: "${KAFKA_CONFIG_SECRET_NAME:dev/arka/kafka-config}"
+reactive:
+  commons:
+    kafka:
+      app:
+        connectionProperties:
+          bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
 ```
 
-## 6.14 Reconstruir y Probar
+## 6.13 Levantar y probar
 
 ```bash
-# Desde la raíz de arka-lab/
+# Desde la raíz del lab
 docker compose up -d --build ms-orders
 ```
 
-Espera a que esté `healthy`:
-
 ```bash
 docker compose ps
-docker logs arka-ms-orders --tail 50
+docker logs arka-ms-orders --tail 80
 ```
 
-### Probar el healthcheck
+### Health
 
 ```bash
 curl http://localhost:8081/api/health | python3 -m json.tool
 ```
 
-### Crear una orden
+### Crear orden
 
 ```bash
 curl -X POST http://localhost:8081/api/orders \
@@ -821,7 +1101,7 @@ curl -X POST http://localhost:8081/api/orders \
   }' | python3 -m json.tool
 ```
 
-**Respuesta esperada:**
+Respuesta esperada (mínima):
 
 ```json
 {
@@ -829,67 +1109,40 @@ curl -X POST http://localhost:8081/api/orders \
   "customerId": "cust-001",
   "sku": "GPU-RTX4090",
   "quantity": 1,
-  "unitPrice": 1599.99,
   "totalAmount": 1599.99,
   "status": "PENDING"
 }
 ```
 
-:::warning La orden queda en PENDING
-Es **correcto** que la orden quede en `PENDING`. Aún no existe `ms-inventory` para procesar el evento `OrderCreatedEvent`. La orden será confirmada o cancelada cuando implementemos los otros microservicios en los módulos siguientes.
-:::
+### Verificar evento en KafkaUI
 
-### Verificar en KafkaUI
+1. Abre `http://localhost:8080`
+2. Revisa topic `order-created`
+3. Confirma que se publicó un CloudEvent
 
-Abre [http://localhost:8080](http://localhost:8080) y busca el topic `order-created`. Deberías ver el mensaje publicado.
-
-### Obtener la orden creada
+### Consultar orden
 
 ```bash
 curl http://localhost:8081/api/orders/{id} | python3 -m json.tool
 ```
 
-## 6.15 ¿Qué acabamos de construir?
+## 6.14 Resultado esperado del módulo
 
-```mermaid
-sequenceDiagram
-    participant C as 🖥️ Client
-    participant O as 🟢 ms-orders
-    participant DB as 🗄️ db_orders
-    participant K as 📨 Kafka
-    participant SM as 🔐 Secrets Manager
+Al terminar este módulo:
 
-    Note over O: Al iniciar...
-    O->>SM: getSecret("db-orders-creds")
-    SM-->>O: {host, port, user, pass}
-    O->>SM: getSecret("kafka-config")
-    SM-->>O: {bootstrapServers, topics...}
-    O->>DB: R2DBC connect ✅
+- `ms-orders` persiste órdenes en PostgreSQL por R2DBC
+- Publica `order-created` al crear órdenes
+- Consume resultados de saga (`stock-failed`, `stock-released`, `payment-processed`)
+- Actualiza estado (`PENDING` -> `CONFIRMED` o `CANCELLED`)
+- Emite eventos de salida (`order-confirmed`, `order-cancelled`)
 
-    C->>O: POST /api/orders
-    O->>DB: INSERT (status=PENDING)
-    DB-->>O: Order saved
-    O->>K: Publish OrderCreatedEvent
-    O-->>C: {status: "PENDING"}
-
-    Note over K: Esperando ms-inventory...
-
-    K-->>O: PaymentProcessedEvent
-    O->>DB: UPDATE status=CONFIRMED
-    Note over O: ✅ Orden confirmada
-
-    K-->>O: PaymentFailedEvent
-    O->>DB: UPDATE status=CANCELLED
-    Note over O: 🚫 Orden cancelada
-```
-
-:::info Checkpoint — ¿Todo funciona?
-- [ ] ¿`docker compose ps` muestra `arka-ms-orders` healthy?
-- [ ] ¿`POST /api/orders` retorna status `PENDING`?
-- [ ] ¿KafkaUI muestra el evento en el topic `order-created`?
-- [ ] ¿`GET /api/orders/{id}` retorna la orden creada?
+:::info Checkpoint
+- [ ] `arka-ms-orders` está `healthy`
+- [ ] `POST /api/orders` crea la orden y la deja `PENDING`
+- [ ] KafkaUI muestra `order-created`
+- [ ] `GET /api/orders/{id}` responde la orden
 :::
 
 ---
 
-**Siguiente:** [Módulo 7: ms-inventory — Stock Reservation & Compensación](./ms-inventory-implementacion)
+**Siguiente:** [Módulo 7: ms-inventory — Reserva de Stock & Compensación](./ms-inventory-implementacion)
