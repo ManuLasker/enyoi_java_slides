@@ -44,7 +44,7 @@ En este módulo usaremos:
 Antes de continuar, asegúrate de que:
 
 1. ✅ La infraestructura del **Módulo 1** está corriendo (`docker compose ps`)
-2. ✅ Tienes **Java 21+** instalado
+2. ✅ Tienes **Java 17+** instalado
 3. ✅ Tienes **Gradle 9.2+** instalado (o usaremos el wrapper)
 
 ```bash
@@ -92,7 +92,7 @@ gradle wrapper
   --type=reactive \
   --name=KafkaPoc \
   --lombok=true \
-  --java-version=21
+  --java-version=17
 ```
 
 :::info ¿Qué acaba de pasar?

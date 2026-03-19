@@ -227,7 +227,6 @@ Resources:
             "orderCreated": "order-created",
             "stockReserved": "stock-reserved",
             "stockReleased": "stock-released",
-            "paymentProcessed": "payment-processed",
             "paymentFailed": "payment-failed",
             "orderConfirmed": "order-confirmed",
             "orderCancelled": "order-cancelled",

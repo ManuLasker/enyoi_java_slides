@@ -94,10 +94,9 @@ sequenceDiagram
     O->>P: HTTP (Circuit Breaker)
 
     alt Pago exitoso
-        P-->>O: PaymentProcessed ✅
+        O->>O: ConfirmOrder ✅
         O->>K: OrderConfirmed
     else Pago fallido
-        P-->>O: PaymentFailed ❌
         O->>K: PaymentFailed
         K-->>I: PaymentFailed → Liberar Stock
         I->>K: StockReleased
@@ -112,7 +111,7 @@ Antes de comenzar, asegúrate de tener instalado:
 <Tabs>
   <TabItem value="mac" label="macOS/Linux" default>
   ```bash
-  java --version        # Java 17+
+    java --version        # Java 17+
   docker compose version # Docker Compose v2+
   python3 --version     # Python 3.7+
   pip install awscli-local  # awslocal CLI
@@ -148,10 +147,10 @@ Antes de comenzar, asegúrate de tener instalado:
 | 5 | [Microservicio Orders — Scaffold, Docker & API Gateway](./modulos/05-microservicio-orders.md) | ~1 hora |
 | 6 | [ms-orders — Implementación Completa](./modulos/06-ms-orders-implementacion.md) | ~2 horas |
 | 7 | [ms-inventory — Reserva de Stock & Compensación](./modulos/07-ms-inventory-implementacion.md) | ~2 horas |
-| 8 | [ms-payment — Simulador & Circuit Breaker](./modulos/08-ms-payment-implementacion.md) | ~1.5 horas |
+| 8 | [ms-payment — Simulador HTTP](./modulos/08-ms-payment-implementacion.md) | ~1.5 horas |
 | 9 | [Pruebas E2E, Escalado y Demo Final](./modulos/09-pruebas-e2e.md) | ~1 hora |
 
 ---
 
-¡Comencemos con el [Módulo 1: Setup Docker Compose](./modulos/setup-docker-compose)!
+¡Comencemos con el [Módulo 1: Setup Docker Compose](./modulos/01-setup-docker-compose.md)!
 

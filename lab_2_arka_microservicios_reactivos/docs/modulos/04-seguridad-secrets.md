@@ -28,7 +28,7 @@ Al igual que en el Módulo 2 (Kafka POC), validamos la integración con un proye
 
 1. ✅ La infraestructura del **Módulo 1** está corriendo (`docker compose ps`)
 2. ✅ El **stack de CloudFormation** del **Módulo 3** fue desplegado (los secretos existen en LocalStack)
-3. ✅ Tienes **Java 21+** y **Gradle 9.2+** instalados
+3. ✅ Tienes **Java 17+** y **Gradle 9.2+** instalados
 
 ```bash
 # Verificar que los secretos existen
@@ -71,7 +71,7 @@ gradle wrapper
   --type=reactive \
   --name=SecretsPoc \
   --lombok=true \
-  --java-version=21
+  --java-version=17
 ```
 
 ### Paso 4: Generar el Entry Point WebFlux (REST API)
@@ -183,7 +183,6 @@ public class BrokerSecret {
         private String orderCreated;
         private String stockReserved;
         private String stockReleased;
-        private String paymentProcessed;
         private String paymentFailed;
         private String orderConfirmed;
         private String orderCancelled;
@@ -604,7 +603,6 @@ curl http://localhost:8900/api/secrets/kafka | python3 -m json.tool
     "orderCreated": "order-created",
     "stockReserved": "stock-reserved",
     "stockReleased": "stock-released",
-    "paymentProcessed": "payment-processed",
     "paymentFailed": "payment-failed",
     "orderConfirmed": "order-confirmed",
     "orderCancelled": "order-cancelled"

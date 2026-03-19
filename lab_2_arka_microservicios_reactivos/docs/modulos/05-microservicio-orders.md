@@ -37,7 +37,7 @@ Antes de agregar lógica de negocio (DDD, R2DBC, Kafka), necesitamos verificar q
 
 1. ✅ La infraestructura del **Módulo 1** está corriendo (`docker compose ps`)
 2. ✅ El **stack de CloudFormation** del **Módulo 3** fue desplegado (API Gateway existe)
-3. ✅ Tienes **Java 21+** y **Gradle 9.2+** instalados
+3. ✅ Tienes **Java 17+** y **Gradle 9.2+** instalados
 
 ```bash
 # Verificar que el API Gateway existe
@@ -51,6 +51,9 @@ Antes de crear el microservicio, agrega las variables del servicio al `.env`:
 ```bash title=".env (agregar al final)"
 MS_ORDERS_PORT=8081
 MS_ORDERS_HOST=arka-ms-orders
+MS_PAYMENT_PORT=8083
+MS_PAYMENT_HOST=arka-ms-payment
+MS_PAYMENT_BASE_URL=http://arka-ms-payment:8083
 ```
 
 ## 5.3 Crear el proyecto con el Scaffold
@@ -85,7 +88,7 @@ gradle wrapper
   --type=reactive \
   --name=MsOrders \
   --lombok=true \
-  --java-version=21
+  --java-version=17
 ```
 
 ### Paso 4: Generar el Entry Point WebFlux
@@ -231,6 +234,10 @@ La imagen `eclipse-temurin:21-jre-alpine` **no incluye `curl`** por defecto. Lo 
 
 Agrega el siguiente servicio al `compose.yaml` existente, **después del bloque de Traefik** y **antes de `networks:`**:
 
+:::note Si aun no creaste ms-payment
+En este modulo puedes omitir temporalmente el bloque `depends_on: ms-payment` y la variable `MS_PAYMENT_BASE_URL`. Los agregaremos de forma definitiva en el Modulo 8 cuando el servicio exista.
+:::
+
 ```yaml title="compose.yaml (agregar al final de services)"
   # ═══════════════════════════════════════════════════
   # MsOrders — Microservicio de Órdenes
@@ -246,12 +253,16 @@ Agrega el siguiente servicio al `compose.yaml` existente, **después del bloque 
       - "${MS_ORDERS_PORT}:${MS_ORDERS_PORT}"
     env_file:
       - .env
+    environment:
+      - MS_PAYMENT_BASE_URL=http://arka-ms-payment:${MS_PAYMENT_PORT:-8083}
     depends_on:
       postgres-orders:
         condition: service_healthy
       localstack:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      ms-payment:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${MS_ORDERS_PORT}/actuator/health"]

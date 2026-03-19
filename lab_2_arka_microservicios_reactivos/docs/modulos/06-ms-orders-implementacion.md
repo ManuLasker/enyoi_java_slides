@@ -14,22 +14,24 @@ import TabItem from '@theme/TabItem';
 
 ## Objetivo
 
-Completar `ms-orders` como microservicio real de la SAGA, exactamente con el patrón que ya tienes funcional:
+Completar `ms-orders` como microservicio real de la SAGA, exactamente con el patrón funcional del lab:
 
 - Persistencia reactiva en PostgreSQL con R2DBC
 - Lectura de secretos desde LocalStack Secrets Manager
 - Publicación y consumo de eventos con Reactive Commons (`async-event-bus` y `async-event-handler`)
+- Orquestación del pago vía HTTP (con Circuit Breaker)
 - API REST para crear y consultar órdenes
 
 ```mermaid
 flowchart LR
-    C[Client] -->|POST /api/orders| O[ms-orders :8081]
-    O -->|R2DBC| DB[(db_orders)]
-    O -->|CloudEvent order-created| K{{Kafka}}
-    K -->|payment-processed| O
-    K -->|stock-failed / stock-released| O
-    O -->|CloudEvent order-confirmed / order-cancelled| K
-    S[Secrets Manager] -.-> O
+  C[Client] -->|POST /api/orders| O[ms-orders :8081]
+  O -->|R2DBC| DB[(db_orders)]
+  O -->|CloudEvent order-created| K{{Kafka}}
+  K -->|stock-reserved / stock-failed / stock-released| O
+  O -->|HTTP payment| P[ms-payment :8083]
+  O -->|CloudEvent payment-failed| K
+  O -->|CloudEvent order-confirmed / order-cancelled| K
+  S[Secrets Manager] -.-> O
 ```
 
 :::note Importante
@@ -98,11 +100,10 @@ services:
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-created --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-reserved --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-released --partitions 3 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-processed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-failed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-confirmed --partitions 3 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-cancelled --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-cancelled --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1
       "
 
   localstack:
@@ -158,7 +159,6 @@ rKafkaSecret:
           "orderCreated": "order-created",
           "stockReserved": "stock-reserved",
           "stockReleased": "stock-released",
-          "paymentProcessed": "payment-processed",
           "paymentFailed": "payment-failed",
           "orderConfirmed": "order-confirmed",
           "orderCancelled": "order-cancelled",
@@ -220,10 +220,26 @@ public record StockReleasedEvent(String orderId, String reason) {
 }
 ```
 
-```java title="PaymentProcessedEvent.java"
+```java title="StockReservedEvent.java"
 package co.com.arka.orders.model.events;
 
-public record PaymentProcessedEvent(String orderId) {
+public record StockReservedEvent(
+  String orderId,
+  String sku,
+  Integer quantity
+) {
+}
+```
+
+```java title="PaymentFailedEvent.java"
+package co.com.arka.orders.model.events;
+
+public record PaymentFailedEvent(
+  String orderId,
+  String sku,
+  Integer quantity,
+  String reason
+) {
 }
 ```
 
@@ -301,9 +317,11 @@ package co.com.arka.orders.usecase.order;
 import co.com.arka.orders.model.events.OrderCancelledEvent;
 import co.com.arka.orders.model.events.OrderConfirmedEvent;
 import co.com.arka.orders.model.events.OrderCreatedEvent;
+import co.com.arka.orders.model.events.PaymentFailedEvent;
 import co.com.arka.orders.model.events.gateways.EventsGateway;
 import co.com.arka.orders.model.order.Order;
 import co.com.arka.orders.model.order.gateways.OrderRepository;
+import co.com.arka.orders.model.payment.gateways.PaymentGateway;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -314,6 +332,8 @@ public class OrderUseCase {
     private final EventsGateway<OrderCreatedEvent> orderCreatedEventEventsPublisher;
     private final EventsGateway<OrderCancelledEvent> orderCancelledEventEventsPublisher;
     private final EventsGateway<OrderConfirmedEvent> orderConfirmedEventEventsPublisher;
+    private final EventsGateway<PaymentFailedEvent> paymentFailedEventEventsPublisher;
+    private final PaymentGateway paymentGateway;
 
     public Mono<Order> createOrder(Order order) {
         order.setStatus("PENDING");
@@ -359,9 +379,139 @@ public class OrderUseCase {
         return orderRepository.findById(id);
     }
 
+    public Mono<Void> processPaymentForOrder(String orderId) {
+      return orderRepository.findById(orderId)
+          .flatMap(order -> paymentGateway.processPayment(order.getId(), order.getTotalAmount())
+              .flatMap(approved -> approved
+                  ? confirmOrder(order.getId()).then()
+                  : publishPaymentFailed(order, "Payment rejected by provider"))
+              .onErrorResume(ex -> publishPaymentFailed(order, "Payment gateway error: " + ex.getMessage())));
+    }
+
+    private Mono<Void> publishPaymentFailed(Order order, String reason) {
+      var failed = new PaymentFailedEvent(
+          order.getId(),
+          order.getSku(),
+          order.getQuantity(),
+          reason
+      );
+      return paymentFailedEventEventsPublisher.emit(failed);
+    }
+
     public Flux<Order> getAllOrders() {
         return orderRepository.findAll();
     }
+}
+```
+
+## 6.5.1 Puerto y adapter HTTP de pagos
+
+### Puerto de dominio
+
+```java title="domain/model/src/main/java/co/com/arka/orders/model/payment/gateways/PaymentGateway.java"
+package co.com.arka.orders.model.payment.gateways;
+
+import reactor.core.publisher.Mono;
+
+public interface PaymentGateway {
+  Mono<Boolean> processPayment(String orderId, Double amount);
+}
+```
+
+### Adapter HTTP + Circuit Breaker
+
+```java title="infrastructure/driven-adapters/rest-consumer/src/main/java/co/com/arka/orders/consumer/RestConsumer.java"
+package co.com.arka.orders.consumer;
+
+import co.com.arka.orders.model.payment.gateways.PaymentGateway;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+
+import java.time.Duration;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class RestConsumer implements PaymentGateway {
+
+  private final WebClient paymentWebClient;
+
+  @Value("${payment.process-path:/api/payments/process}")
+  private String processPath;
+
+  @Value("${payment.timeout-seconds:3}")
+  private Long timeoutSeconds;
+
+  @Override
+  @CircuitBreaker(name = "payment")
+  public Mono<Boolean> processPayment(String orderId, Double amount) {
+    var request = new PaymentRequest(orderId, amount);
+
+    return paymentWebClient.post()
+        .uri(processPath)
+        .bodyValue(request)
+        .retrieve()
+        .toBodilessEntity()
+        .map(response -> true)
+        .timeout(Duration.ofSeconds(timeoutSeconds))
+        .doOnError(error -> log.warn("Payment request failed for order {}: {}", orderId, error.getMessage()))
+        .onErrorReturn(false);
+  }
+
+  private record PaymentRequest(String orderId, Double amount) {
+  }
+}
+```
+
+```java title="infrastructure/driven-adapters/rest-consumer/src/main/java/co/com/arka/orders/consumer/config/RestConsumerConfig.java"
+package co.com.arka.orders.consumer.config;
+
+import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.handler.timeout.WriteTimeoutHandler;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ClientHttpConnector;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
+
+import static io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
+@Configuration
+public class RestConsumerConfig {
+
+  private final String url;
+
+  public RestConsumerConfig(@Value("${payment.base-url:http://localhost:8083}") String url) {
+    this.url = url;
+  }
+
+  @Bean
+  public WebClient getWebClient(WebClient.Builder builder) {
+    return builder
+        .baseUrl(url)
+        .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+        .clientConnector(getClientHttpConnector())
+        .build();
+  }
+
+  private ClientHttpConnector getClientHttpConnector() {
+    /*
+    If you require append SSL certificate self signed: this should be in the default cacerts truststore.
+    */
+    return new ReactorClientHttpConnector(HttpClient.create()
+            .compress(true)
+            .keepAlive(true));
+  }
 }
 ```
 
@@ -453,7 +603,6 @@ public record KafkaBrokerSecretProducer(
             String stockReserved,
             String stockReleased,
             String stockFailed,
-            String paymentProcessed,
             String paymentFailed,
             String orderConfirmed,
             String orderCancelled
@@ -478,7 +627,6 @@ public record KafkaBrokerSecretConsumer(
             String stockReserved,
             String stockReleased,
             String stockFailed,
-            String paymentProcessed,
             String paymentFailed,
             String orderConfirmed,
             String orderCancelled
@@ -651,6 +799,56 @@ public class OrderCancelledEventGateway implements EventsGateway<OrderCancelledE
 }
 ```
 
+  ### 6.7.4 `PaymentFailedEventGateway`
+
+  ```java title=".../events/PaymentFailedEventGateway.java"
+  package co.com.arka.orders.events;
+
+  import co.com.arka.orders.events.config.KafkaBrokerSecretProducer;
+  import co.com.arka.orders.model.events.PaymentFailedEvent;
+  import co.com.arka.orders.model.events.gateways.EventsGateway;
+  import io.cloudevents.CloudEvent;
+  import io.cloudevents.core.builder.CloudEventBuilder;
+  import io.cloudevents.jackson.JsonCloudEventData;
+  import lombok.RequiredArgsConstructor;
+  import lombok.extern.java.Log;
+  import org.reactivecommons.api.domain.DomainEventBus;
+  import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+  import reactor.core.publisher.Mono;
+  import tools.jackson.databind.ObjectMapper;
+
+  import java.net.URI;
+  import java.time.OffsetDateTime;
+  import java.util.UUID;
+  import java.util.logging.Level;
+
+  import static reactor.core.publisher.Mono.from;
+
+  @Log
+  @RequiredArgsConstructor
+  @EnableDomainEventBus
+  public class PaymentFailedEventGateway implements EventsGateway<PaymentFailedEvent> {
+    private final KafkaBrokerSecretProducer brokerSecret;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(PaymentFailedEvent event) {
+      String eventName = brokerSecret.topics().paymentFailed();
+      log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+      CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+          .withId(UUID.randomUUID().toString())
+          .withSource(URI.create("https://reactive-commons.org/foos"))
+          .withType(eventName)
+          .withTime(OffsetDateTime.now())
+          .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+          .build();
+
+      return from(domainEventBus.emit(eventCloudEvent));
+    }
+  }
+  ```
+
 ## 6.8 Consumo de eventos (async-event-handler)
 
 Dependencias del módulo:
@@ -672,7 +870,7 @@ dependencies {
 ```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/orders/events/handlers/EventsHandler.java"
 package co.com.arka.orders.events.handlers;
 
-import co.com.arka.orders.model.events.PaymentProcessedEvent;
+import co.com.arka.orders.model.events.StockReservedEvent;
 import co.com.arka.orders.model.events.StockReleasedEvent;
 import co.com.arka.orders.model.events.StockReserveFailedEvent;
 import co.com.arka.orders.usecase.order.OrderUseCase;
@@ -695,9 +893,9 @@ public class EventsHandler {
     private final ObjectMapper objectMapper;
 
     public Mono<Void> handleStockFailedEvent(CloudEvent event) {
-        Optional<StockReserveFailedEvent> stockReserveFailedEvent = deserialize(event, StockReserveFailedEvent.class);
+      Optional<StockReserveFailedEvent> stockFailedEvent = deserialize(event, StockReserveFailedEvent.class);
 
-        return Mono.justOrEmpty(stockReserveFailedEvent)
+        return Mono.justOrEmpty(stockFailedEvent)
                 .doOnNext(st -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), st}))
                 .flatMap(st -> orderUseCase.cancelOrder(st.orderId(), "Out of stock: " + st.reason()))
                 .doOnNext(order -> log.info("Order: " + order.getId() + " cancelled due to stock failure"))
@@ -714,14 +912,13 @@ public class EventsHandler {
                 .then();
     }
 
-    public Mono<Void> handlePaymentProcessedEvent(CloudEvent event) {
-        Optional<PaymentProcessedEvent> paymentProcessedEvent = deserialize(event, PaymentProcessedEvent.class);
+    public Mono<Void> handleStockReservedEvent(CloudEvent event) {
+        Optional<StockReservedEvent> stockReservedEvent = deserialize(event, StockReservedEvent.class);
 
-        return Mono.justOrEmpty(paymentProcessedEvent)
-                .doOnNext(st -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), st}))
-                .flatMap(st -> orderUseCase.confirmOrder(st.orderId()))
-                .doOnNext(order -> log.info("Order: " + order.getId() + " confirm after payment"))
-                .then();
+        return Mono.justOrEmpty(stockReservedEvent)
+            .doOnNext(st -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), st}))
+            .flatMap(st -> orderUseCase.processPaymentForOrder(st.orderId()))
+            .then();
     }
 
     private <T> Optional<T> deserialize(CloudEvent event, Class<T> clazz) {
@@ -761,9 +958,9 @@ public class HandlerRegistryConfiguration {
     @Bean
     public HandlerRegistry handlerRegistry(EventsHandler events) {
         return HandlerRegistry.register()
+          .listenCloudEvent(kafkaBrokerSecretConsumer.topics().stockReserved(), events::handleStockReservedEvent)
                 .listenCloudEvent(kafkaBrokerSecretConsumer.topics().stockFailed(), events::handleStockFailedEvent)
-                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().stockReleased(), events::handleStockReleasedEvent)
-                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().paymentProcessed(), events::handlePaymentProcessedEvent);
+          .listenCloudEvent(kafkaBrokerSecretConsumer.topics().stockReleased(), events::handleStockReleasedEvent);
     }
 }
 ```
@@ -1054,6 +1251,9 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
 cors:
   allowed-origins: "http://localhost:4200,http://localhost:8080"
 aws:
@@ -1068,6 +1268,40 @@ reactive:
       app:
         connectionProperties:
           bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
+payment:
+  base-url: "${MS_PAYMENT_BASE_URL:http://localhost:8083}"
+  process-path: "${MS_PAYMENT_PROCESS_PATH:/api/payments/process}"
+  timeout-seconds: "${MS_PAYMENT_TIMEOUT_SECONDS:3}"
+resilience4j:
+  circuitbreaker:
+    instances:
+      payment:
+        sliding-window-size: "${MS_PAYMENT_CB_SLIDING_WINDOW_SIZE:10}"
+        minimum-number-of-calls: "${MS_PAYMENT_CB_MIN_CALLS:5}"
+        failure-rate-threshold: "${MS_PAYMENT_CB_FAILURE_RATE:50}"
+        wait-duration-in-open-state: "${MS_PAYMENT_CB_OPEN_WAIT_SECONDS:20s}"
+      testGet:
+        registerHealthIndicator: true
+        failureRateThreshold: 50
+        slowCallRateThreshold: 50
+        slowCallDurationThreshold: "2s"
+        permittedNumberOfCallsInHalfOpenState: 3
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 10
+        waitDurationInOpenState: "10s"
+      testPost:
+        registerHealthIndicator: true
+        failureRateThreshold: 50
+        slowCallRateThreshold: 50
+        slowCallDurationThreshold: "2s"
+        permittedNumberOfCallsInHalfOpenState: 3
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 10
+        waitDurationInOpenState: "10s"
+adapter:
+  restconsumer:
+    timeout: 5000
+    url: "http://localhost:8080/api/payments/process"
 ```
 
 ## 6.13 Levantar y probar
@@ -1132,7 +1366,7 @@ Al terminar este módulo:
 
 - `ms-orders` persiste órdenes en PostgreSQL por R2DBC
 - Publica `order-created` al crear órdenes
-- Consume resultados de saga (`stock-failed`, `stock-released`, `payment-processed`)
+- Consume resultados de saga (`stock-failed`, `stock-released`, `stock-reserved`)
 - Actualiza estado (`PENDING` -> `CONFIRMED` o `CANCELLED`)
 - Emite eventos de salida (`order-confirmed`, `order-cancelled`)
 

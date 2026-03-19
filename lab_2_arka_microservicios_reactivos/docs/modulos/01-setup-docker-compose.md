@@ -40,7 +40,7 @@ flowchart LR
     style DB_P fill:#8be9fd,color:#282a36
 ```
 
-Esto es el patrón **Database per Service**: **ningún servicio puede leer directamente la BD de otro**. La coordinación entre servicios ocurre solo a través de eventos Kafka.
+Esto es el patrón **Database per Service**: **ningún servicio puede leer directamente la BD de otro**. La coordinación entre servicios ocurre a través de eventos Kafka y una llamada HTTP puntual (ms-orders → ms-payment).
 
 ## 1.3 Variables de entorno
 
@@ -65,6 +65,11 @@ LOCALSTACK_PORT=4566
 LOCALSTACK_HOST=arka-localstack
 MS_ORDERS_PORT=8081
 MS_ORDERS_HOST=arka-ms-orders
+MS_INVENTORY_PORT=8082
+MS_INVENTORY_HOST=arka-ms-inventory
+MS_PAYMENT_PORT=8083
+MS_PAYMENT_HOST=arka-ms-payment
+MS_PAYMENT_BASE_URL=http://arka-ms-payment:8083
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
 AWS_REGION=us-east-1
@@ -276,11 +281,10 @@ services:
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-created --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-reserved --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-released --partitions 3 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-processed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-failed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-confirmed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-cancelled --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1 &&
       echo '═════════════════════════════════════════════════'
       "
     networks:
