@@ -43,9 +43,8 @@ flowchart TB
     Client --> APIGW --> O
     T --> I1 & I2 & I3
     O --> K --> I1 & I2 & I3
-    I1 & I2 & I3 --> K --> P
-    P --> K --> O
-    P --> K --> I1 & I2 & I3
+    I1 & I2 & I3 --> K --> O
+    O -->|HTTP| P
 
     O --> DB1
     I1 & I2 & I3 --> DB2
@@ -118,10 +117,13 @@ docker logs arka-ms-orders --tail 5
 # 2. ms-inventory: Recibió OrderCreated, reservó stock, publicó StockReserved
 docker logs arka-ms-inventory --tail 5
 
-# 3. ms-payment: Recibió StockReserved, procesó pago
+# 3. ms-orders: Recibió StockReserved y llamó a ms-payment (HTTP)
+docker logs arka-ms-orders --tail 10
+
+# 4. ms-payment: Procesó el pago
 docker logs arka-ms-payment --tail 5
 
-# 4. ms-orders: Recibió PaymentProcessed, confirmó orden
+# 5. ms-orders: Confirmó orden
 docker logs arka-ms-orders --tail 10
 ```
 
@@ -132,9 +134,8 @@ ms-orders:     ✅ Evento publicado en [order-created]
 ms-inventory:  📨 Evento recibido de [order-created]
 ms-inventory:  📦 Stock reservado: SKU=GPU-RTX4090, restante=49
 ms-inventory:  ✅ StockReserved publicado
-ms-payment:    📨 StockReserved recibido para orden abc-123
-ms-payment:    ✅ Pago APROBADO para orden abc-123
-ms-orders:     📨 Evento recibido de [payment-processed]
+ms-orders:     📨 Evento recibido de [stock-reserved]
+ms-payment:    ✅ Pago PROCESSED para orden abc-123
 ms-orders:     ✅ Orden abc-123 CONFIRMADA
 ```
 
@@ -183,12 +184,12 @@ done
 Cuando el pago falla:
 
 ```
-ms-payment:    ❌ Pago RECHAZADO para orden xyz-789
-ms-payment:    📤 Evento publicado en [payment-failed]
+ms-payment:    ❌ Pago FAILED para orden xyz-789
+ms-orders:     📤 Evento publicado en [payment-failed]
 ms-inventory:  📨 Evento recibido de [payment-failed]
-ms-inventory:  🔄 Stock liberado: SKU=GPU-RTX4090, restante=50
-ms-orders:     📨 Evento recibido de [payment-failed]
-ms-orders:     🚫 Orden xyz-789 CANCELADA: Fondos insuficientes (simulado)
+ms-inventory:  🔄 Stock liberado para orden xyz-789
+ms-orders:     📨 Evento recibido de [stock-released]
+ms-orders:     🚫 Orden xyz-789 CANCELADA
 ```
 
 ### Verificar consistencia
@@ -214,10 +215,12 @@ Abre [http://localhost:8080](http://localhost:8080) para ver el flujo de eventos
 | Topic | Productor | Consumidor |
 |-------|-----------|------------|
 | `order-created` | ms-orders | ms-inventory |
-| `stock-reserved` | ms-inventory | ms-payment |
+| `stock-reserved` | ms-inventory | ms-orders |
 | `stock-failed` | ms-inventory | ms-orders |
-| `payment-processed` | ms-payment | ms-orders |
-| `payment-failed` | ms-payment | ms-orders, ms-inventory |
+| `payment-failed` | ms-orders | ms-inventory |
+| `stock-released` | ms-inventory | ms-orders |
+| `order-confirmed` | ms-orders | (solo auditoria) |
+| `order-cancelled` | ms-orders | (solo auditoria) |
 
 :::tip Navega a cada topic
 En KafkaUI, haz clic en cada topic para ver los mensajes individuales con su key (orderId), value (JSON del evento), y timestamps.
@@ -244,39 +247,45 @@ curl -X POST "https://${API_ID}.execute-api.localhost.localstack.cloud:4566/v1/o
 
 ## 9.6 Prueba 4: Circuit Breaker
 
-### Paso 1: Verificar que funciona normalmente
-
-```bash
-curl http://localhost:8081/api/fraud-check/user-001 | python3 -m json.tool
-# → {"userId": "user-001", "isFraud": false}
-```
-
-### Paso 2: Apagar ms-payment
+### Paso 1: Apagar ms-payment
 
 ```bash
 docker compose stop ms-payment
 ```
 
-### Paso 3: Llamar al fraud-check (Circuit Breaker activado)
+### Paso 2: Crear una orden (gatilla el pago HTTP)
 
 ```bash
-curl http://localhost:8081/api/fraud-check/user-001 | python3 -m json.tool
-# → {"isFraud": false}  ← respuesta del fallback
+curl -X POST http://localhost:8081/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customerId": "cust-cb",
+    "sku": "GPU-RTX4090",
+    "quantity": 1,
+    "unitPrice": 1599.99
+  }' | python3 -m json.tool
 ```
 
+### Paso 3: Ver el fallback en ms-orders
+
 ```bash
-# Ver en los logs
-docker logs arka-ms-orders --tail 5
-# → ⚡ Circuit Breaker activado: Connection refused
+docker logs arka-ms-orders --tail 10
+```
+
+Deberias ver errores de pago y publicaciones de `payment-failed`, por ejemplo:
+
+```
+Payment request failed for order ...
+Evento publicado en [payment-failed]
 ```
 
 ### Paso 4: Restaurar ms-payment
 
 ```bash
 docker compose start ms-payment
-# Después de 5 segundos (waitDurationInOpenState), el circuito pasa a HALF_OPEN
-# Las siguientes llamadas exitosas lo vuelven a CLOSED
 ```
+
+Con ms-payment arriba, las siguientes ordenes deberian volver a confirmarse.
 
 ## 9.7 Escalado Horizontal con Traefik
 
@@ -296,7 +305,7 @@ Abre [http://localhost:8090](http://localhost:8090) y busca el servicio `invento
 
 ```bash
 for i in {1..6}; do
-  curl -s http://localhost:8082/api/health | python3 -c "import sys,json; print(json.load(sys.stdin)['timestamp'])"
+  curl -s http://localhost/inventory/api/health | python3 -c "import sys,json; print(json.load(sys.stdin)['timestamp'])"
 done
 ```
 
@@ -345,21 +354,19 @@ sequenceDiagram
     I->>I: Reserve Stock
     I->>K: StockReservedEvent
 
-    K->>P: consume stock-reserved
+    O->>P: HTTP payment
 
     alt ✅ Pago Exitoso (70%)
-        P->>K: PaymentProcessedEvent
-        K->>O: consume payment-processed
-        O->>O: Update(CONFIRMED) ✅
+      O->>O: Update(CONFIRMED) ✅
+      O->>K: OrderConfirmedEvent
     else ❌ Pago Fallido (30%)
-        P->>K: PaymentFailedEvent
-        par Compensación
-            K->>I: consume payment-failed
-            I->>I: Release Stock 🔄
-        and
-            K->>O: consume payment-failed
-            O->>O: Update(CANCELLED) 🚫
-        end
+      O->>K: PaymentFailedEvent
+      K->>I: consume payment-failed
+      I->>I: Release Stock 🔄
+      I->>K: StockReleasedEvent
+      K->>O: consume stock-released
+      O->>O: Update(CANCELLED) 🚫
+      O->>K: OrderCancelledEvent
     end
 ```
 

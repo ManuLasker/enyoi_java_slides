@@ -56,7 +56,7 @@ gradle wrapper
   --type=reactive \
   --name=MsInventory \
   --lombok=true \
-  --java-version=21
+    --java-version=17
 
 # Entry point + Driven adapters
 ./gradlew gep --type webflux
@@ -97,22 +97,27 @@ package co.com.arka.inventory.model.events;
 public record StockReservedEvent(String orderId, String sku, Integer quantity) {}
 ```
 
-```java title="domain/model/src/main/java/co/com/arka/inventory/model/events/StockReserveFailedEvent.java"
+```java title="domain/model/src/main/java/co/com/arka/inventory/model/events/StockFailedEvent.java"
 package co.com.arka.inventory.model.events;
 
-public record StockReserveFailedEvent(String orderId, String reason) {}
+public record StockFailedEvent(String orderId, String reason) {}
 ```
 
 ```java title="domain/model/src/main/java/co/com/arka/inventory/model/events/StockReleasedEvent.java"
 package co.com.arka.inventory.model.events;
 
-public record StockReleasedEvent(String orderId, String sku, Integer quantity) {}
+public record StockReleasedEvent(String orderId, String reason) {}
 ```
 
 ```java title="domain/model/src/main/java/co/com/arka/inventory/model/events/PaymentFailedEvent.java"
 package co.com.arka.inventory.model.events;
 
-public record PaymentFailedEvent(String orderId, String reason) {}
+public record PaymentFailedEvent(
+    String orderId,
+    String sku,
+    Integer quantity,
+    String reason
+) {}
 ```
 
 ## 7.4 Modelo de Dominio — Product
@@ -125,45 +130,22 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
-
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class Product {
-    private Long id;
+    private String id;
     private String sku;
     private String name;
-    private BigDecimal price;
+    private Double price;
     private Integer stock;
     private String category;
-
-    // highlight-start
-    public Product reserveStock(int quantity) {
-        if (this.stock < quantity) {
-            throw new IllegalStateException(
-                String.format("Stock insuficiente para SKU %s: disponible=%d, solicitado=%d",
-                    sku, stock, quantity));
-        }
-        this.stock -= quantity;
-        return this;
-    }
-    // highlight-end
-
-    public Product releaseStock(int quantity) {
-        this.stock += quantity;
-        return this;
-    }
-
-    public boolean hasAvailableStock(int quantity) {
-        return this.stock >= quantity;
-    }
 }
 ```
 
-:::warning Regla de Negocio Crítica
-`reserveStock()` **nunca permite stock negativo**. La BD tiene `CHECK (stock >= 0)` como segunda línea de defensa.
+:::warning Regla de Negocio Critica
+No permitimos stock negativo. La verificacion se hace en el caso de uso y tambien existe un `CHECK (stock >= 0)` en la BD.
 :::
 
 ### Puerto del Repositorio
@@ -177,8 +159,8 @@ import reactor.core.publisher.Mono;
 
 public interface ProductRepository {
     Mono<Product> save(Product product);
+    Mono<Product> findById(String id);
     Mono<Product> findBySku(String sku);
-    Mono<Product> findById(Long id);
     Flux<Product> findAll();
 }
 ```
@@ -203,7 +185,6 @@ public class BrokerSecret {
         private String stockReserved;
         private String stockReleased;
         private String stockFailed;
-        private String paymentProcessed;
         private String paymentFailed;
         private String orderConfirmed;
         private String orderCancelled;
@@ -213,48 +194,96 @@ public class BrokerSecret {
 
 ## 7.5 Caso de Uso — InventoryUseCase
 
-```java title="domain/usecase/src/main/java/co/com/arka/inventory/usecase/product/InventoryUseCase.java"
-package co.com.arka.inventory.usecase.product;
+```java title="domain/usecase/src/main/java/co/com/arka/inventory/usecase/inventory/InventoryUseCase.java"
+package co.com.arka.inventory.usecase.inventory;
 
+import co.com.arka.inventory.model.events.StockFailedEvent;
+import co.com.arka.inventory.model.events.StockReleasedEvent;
+import co.com.arka.inventory.model.events.StockReservedEvent;
+import co.com.arka.inventory.model.events.OrderCreatedEvent;
+import co.com.arka.inventory.model.events.gateways.EventsGateway;
 import co.com.arka.inventory.model.product.Product;
 import co.com.arka.inventory.model.product.gateways.ProductRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import lombok.extern.java.Log;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-@Slf4j
+import java.util.logging.Level;
+
+@Log
 @RequiredArgsConstructor
 public class InventoryUseCase {
-
     private final ProductRepository productRepository;
+    private final EventsGateway<StockReservedEvent> stockReservedEventPublisher;
+    private final EventsGateway<StockFailedEvent> stockFailedEventPublisher;
+    private final EventsGateway<StockReleasedEvent> stockReleasedEventPublisher;
 
-    // highlight-start
-    public Mono<Product> reserveStock(String sku, int quantity) {
-        return productRepository.findBySku(sku)
-            .switchIfEmpty(Mono.error(
-                new IllegalArgumentException("Producto no encontrado: " + sku)))
-            .map(product -> product.reserveStock(quantity))
-            .flatMap(productRepository::save)
-            .doOnSuccess(p -> log.info("📦 Stock reservado: SKU={}, restante={}", sku, p.getStock()));
+    public Mono<Void> reserveStock(OrderCreatedEvent event) {
+        log.log(Level.INFO, "Reserving stock for order: {0}, sku: {1}, qty: {2}",
+                new Object[]{event.orderId(), event.sku(), event.quantity()});
+
+        return productRepository.findBySku(event.sku())
+                .flatMap(product -> {
+                    if (product.getStock() >= event.quantity()) {
+                        product.setStock(product.getStock() - event.quantity());
+                        return productRepository.save(product)
+                                .flatMap(saved -> {
+                                    var reserved = new StockReservedEvent(event.orderId(), event.sku(), event.quantity());
+                                    log.log(Level.INFO, "Stock reserved successfully for order: {0}", event.orderId());
+                                    return stockReservedEventPublisher.emit(reserved);
+                                });
+                    } else {
+                        var failed = new StockFailedEvent(event.orderId(),
+                                "Insufficient stock for SKU: " + event.sku()
+                                        + ". Available: " + product.getStock()
+                                        + ", Requested: " + event.quantity());
+                        log.log(Level.WARNING, "Stock reservation failed for order: {0}", event.orderId());
+                        return stockFailedEventPublisher.emit(failed);
+                    }
+                })
+                .switchIfEmpty(Mono.defer(() -> {
+                    var failed = new StockFailedEvent(event.orderId(),
+                            "Product not found for SKU: " + event.sku());
+                    log.log(Level.WARNING, "Product not found for SKU: {0}", event.sku());
+                    return stockFailedEventPublisher.emit(failed);
+                }));
     }
 
-    public Mono<Product> releaseStock(String sku, int quantity) {
-        return productRepository.findBySku(sku)
-            .switchIfEmpty(Mono.error(
-                new IllegalArgumentException("Producto no encontrado: " + sku)))
-            .map(product -> product.releaseStock(quantity))
-            .flatMap(productRepository::save)
-            .doOnSuccess(p -> log.info("🔄 Stock liberado: SKU={}, restante={}", sku, p.getStock()));
-    }
-    // highlight-end
+    public Mono<Void> releaseStock(String orderId, String sku, Integer quantity, String reason) {
+        if (sku == null || quantity == null || quantity <= 0) {
+            log.log(Level.WARNING, "Cannot release stock for order {0}: invalid reservation data (sku={1}, quantity={2})",
+                    new Object[]{orderId, sku, quantity});
+            var released = new StockReleasedEvent(orderId, reason + " (invalid reservation data)");
+            return stockReleasedEventPublisher.emit(released);
+        }
 
-    public Mono<Product> getProduct(String sku) {
-        return productRepository.findBySku(sku);
+        log.log(Level.INFO, "Releasing stock for order: {0}, sku: {1}, qty: {2}",
+                new Object[]{orderId, sku, quantity});
+
+        return productRepository.findBySku(sku)
+                .flatMap(product -> {
+                    product.setStock(product.getStock() + quantity);
+                    return productRepository.save(product)
+                            .flatMap(saved -> {
+                                var released = new StockReleasedEvent(orderId, reason);
+                                log.log(Level.INFO, "Stock released for order: {0}", orderId);
+                                return stockReleasedEventPublisher.emit(released);
+                            });
+                })
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.log(Level.WARNING, "Cannot release stock: product not found for SKU: {0}", sku);
+                    var released = new StockReleasedEvent(orderId, reason + " (product not found)");
+                    return stockReleasedEventPublisher.emit(released);
+                }));
     }
 
     public Flux<Product> getAllProducts() {
         return productRepository.findAll();
+    }
+
+    public Mono<Product> getProduct(String id) {
+        return productRepository.findById(id);
     }
 }
 ```
@@ -318,16 +347,15 @@ package co.com.arka.inventory.r2dbc.entity;
 import lombok.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
-import java.math.BigDecimal;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
 @Table("products")
 public class ProductData {
     @Id
-    private Long id;
+    private String id;
     private String sku;
     private String name;
-    private BigDecimal price;
+    private Double price;
     private Integer stock;
     private String category;
 }
@@ -339,10 +367,11 @@ public class ProductData {
 package co.com.arka.inventory.r2dbc;
 
 import co.com.arka.inventory.r2dbc.entity.ProductData;
+import org.springframework.data.repository.query.ReactiveQueryByExampleExecutor;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Mono;
 
-public interface ProductReactiveRepository extends ReactiveCrudRepository<ProductData, Long> {
+public interface ProductReactiveRepository extends ReactiveCrudRepository<ProductData, String>, ReactiveQueryByExampleExecutor<ProductData> {
     Mono<ProductData> findBySku(String sku);
 }
 ```
@@ -356,29 +385,23 @@ import co.com.arka.inventory.r2dbc.entity.ProductData;
 import co.com.arka.inventory.r2dbc.helper.ReactiveAdapterOperations;
 import org.reactivecommons.utils.ObjectMapper;
 import org.springframework.stereotype.Repository;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Repository
-public class ProductReactiveRepositoryAdapter 
-    extends ReactiveAdapterOperations<Product, ProductData, Long, ProductReactiveRepository>
-    implements ProductRepository {
+public class ProductReactiveRepositoryAdapter extends ReactiveAdapterOperations<
+    Product,
+    ProductData,
+    String,
+    ProductReactiveRepository
+> implements ProductRepository {
 
-    public ProductReactiveRepositoryAdapter(
-            ProductReactiveRepository repository, ObjectMapper mapper) {
-        super(repository, mapper, d -> mapper.map(d, Product.class));
+    public ProductReactiveRepositoryAdapter(ProductReactiveRepository repository, ObjectMapper mapper) {
+        super(repository, mapper, productData -> mapper.map(productData, Product.class));
     }
 
     @Override
     public Mono<Product> findBySku(String sku) {
-        return repository.findBySku(sku)
-            .map(data -> mapper.map(data, Product.class));
-    }
-
-    @Override
-    public Flux<Product> findAll() {
-        return repository.findAll()
-            .map(data -> mapper.map(data, Product.class));
+        return repository.findBySku(sku).map(this::toEntity);
     }
 }
 ```
@@ -395,8 +418,13 @@ import io.r2dbc.postgresql.PostgresqlConnectionFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+
 @Configuration
 public class PostgreSQLConnectionPool {
+    public static final int INITIAL_SIZE = 12;
+    public static final int MAX_SIZE = 15;
+    public static final int MAX_IDLE_TIME = 30;
 
     @Bean
     public ConnectionPool connectionPool(PostgresqlConnectionProperties props) {
@@ -408,189 +436,109 @@ public class PostgreSQLConnectionPool {
             .password(props.password())
             .build();
 
-        return new ConnectionPool(
-            ConnectionPoolConfiguration.builder()
-                .connectionFactory(new PostgresqlConnectionFactory(dbConfig))
-                .build()
-        );
+        ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder()
+            .connectionFactory(new PostgresqlConnectionFactory(dbConfig))
+            .name("api-postgres-connection-pool")
+            .initialSize(INITIAL_SIZE)
+            .maxSize(MAX_SIZE)
+            .maxIdleTime(Duration.ofMinutes(MAX_IDLE_TIME))
+            .validationQuery("SELECT 1")
+            .build();
+
+        return new ConnectionPool(poolConfiguration);
     }
 }
 ```
 
-## 7.7 Infraestructura — Kafka (Consumer + Producer)
+## 7.7 Consumo de eventos (async-event-handler)
 
-### Kafka Producer Config
+En este lab no configuramos consumers manuales. Usamos **Reactive Commons** para consumir eventos desde Kafka.
 
-```java title="applications/app-service/src/main/java/co/com/arka/inventory/config/KafkaProducerConfig.java"
-package co.com.arka.inventory.config;
+```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/inventory/events/handlers/EventsHandler.java"
+package co.com.arka.inventory.events.handlers;
 
-import co.com.arka.inventory.model.brokersecret.BrokerSecret;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderOptions;
-
-import java.util.HashMap;
-import java.util.Map;
-
-@Configuration
-public class KafkaProducerConfig {
-
-    @Bean
-    public KafkaSender<String, String> kafkaSender(BrokerSecret brokerSecret) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerSecret.getBootstrapServers());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        return KafkaSender.create(SenderOptions.create(props));
-    }
-}
-```
-
-### Kafka Consumer Config
-
-```java title="applications/app-service/src/main/java/co/com/arka/inventory/config/KafkaConsumerConfig.java"
-package co.com.arka.inventory.config;
-
-import co.com.arka.inventory.model.brokersecret.BrokerSecret;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import reactor.kafka.receiver.KafkaReceiver;
-import reactor.kafka.receiver.ReceiverOptions;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-@Configuration
-public class KafkaConsumerConfig {
-
-    @Bean
-    public KafkaReceiver<String, String> kafkaReceiver(BrokerSecret brokerSecret) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerSecret.getBootstrapServers());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "inventory-group");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, brokerSecret.getAutoOffsetReset());
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-
-        ReceiverOptions<String, String> options = ReceiverOptions.<String, String>create(props)
-            .subscription(List.of(
-                brokerSecret.getTopics().getOrderCreated(),
-                brokerSecret.getTopics().getPaymentFailed()
-            ));
-
-        return KafkaReceiver.create(options);
-    }
-}
-```
-
-### SAGA Listener — El corazón de la compensación
-
-```java title="applications/app-service/src/main/java/co/com/arka/inventory/config/InventorySagaListener.java"
-package co.com.arka.inventory.config;
-
-import co.com.arka.inventory.model.brokersecret.BrokerSecret;
-import co.com.arka.inventory.model.events.*;
-import co.com.arka.inventory.usecase.product.InventoryUseCase;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
+import co.com.arka.inventory.model.events.OrderCreatedEvent;
+import co.com.arka.inventory.model.events.PaymentFailedEvent;
+import co.com.arka.inventory.usecase.inventory.InventoryUseCase;
+import io.cloudevents.CloudEvent;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import lombok.extern.java.Log;
+import org.reactivecommons.async.impl.config.annotations.EnableEventListeners;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import reactor.kafka.receiver.KafkaReceiver;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
+import tools.jackson.databind.ObjectMapper;
 
-@Slf4j
+import java.util.Optional;
+import java.util.logging.Level;
+
+@Log
 @Component
 @RequiredArgsConstructor
-public class InventorySagaListener {
+@EnableEventListeners
+public class EventsHandler {
 
-    private final KafkaReceiver<String, String> kafkaReceiver;
-    private final KafkaSender<String, String> kafkaSender;
     private final InventoryUseCase inventoryUseCase;
-    private final BrokerSecret brokerSecret;
     private final ObjectMapper objectMapper;
 
-    @PostConstruct
-    public void startListening() {
-        kafkaReceiver.receive()
-            .doOnNext(record -> {
-                String topic = record.topic();
-                String value = record.value();
-                log.info("📨 Evento recibido de [{}]: {}", topic, value);
+    public Mono<Void> handleOrderCreatedEvent(CloudEvent event) {
+        Optional<OrderCreatedEvent> orderCreatedEvent = deserialize(event, OrderCreatedEvent.class);
 
-                try {
-                    // highlight-start
-                    if (topic.equals(brokerSecret.getTopics().getOrderCreated())) {
-                        handleOrderCreated(value);
-                    } else if (topic.equals(brokerSecret.getTopics().getPaymentFailed())) {
-                        handlePaymentFailed(value);
-                    }
-                    // highlight-end
-                } catch (Exception e) {
-                    log.error("❌ Error procesando evento: {}", e.getMessage());
-                }
-
-                record.receiverOffset().acknowledge();
-            })
-            .subscribe();
-    }
-
-    // ── Happy Path: Reservar Stock ──
-    private void handleOrderCreated(String json) throws Exception {
-        var event = objectMapper.readValue(json, OrderCreatedEvent.class);
-
-        inventoryUseCase.reserveStock(event.sku(), event.quantity())
-            .flatMap(product -> {
-                var reserved = new StockReservedEvent(event.orderId(), event.sku(), event.quantity());
-                return sendEvent(brokerSecret.getTopics().getStockReserved(), event.orderId(), reserved);
-            })
-            .doOnSuccess(v -> log.info("✅ StockReserved publicado para orden {}", event.orderId()))
-            .onErrorResume(e -> {
-                log.error("❌ No se pudo reservar stock: {}", e.getMessage());
-                var failed = new StockReserveFailedEvent(event.orderId(), e.getMessage());
-                return sendEvent(brokerSecret.getTopics().getStockFailed(), event.orderId(), failed);
-            })
-            .subscribe();
-    }
-
-    // ── Compensación: Devolver Stock ──
-    private void handlePaymentFailed(String json) throws Exception {
-        var event = objectMapper.readValue(json, PaymentFailedEvent.class);
-        log.info("🔄 Compensación: Devolviendo stock para orden {}", event.orderId());
-
-        // NOTE: En producción, guardaríamos la reserva en una tabla para saber
-        // el SKU y cantidad. Para el lab, leemos del OrderCreatedEvent original.
-        // Por simplicidad, asumimos que el topic payment-failed incluye los datos.
-        // En esta versión simplificada, el SKU y quantity se reconstruyen.
-        // TODO: En módulos avanzados, usar tabla de reservas.
-    }
-
-    private <T> Mono<Void> sendEvent(String topic, String key, T event) {
-        try {
-            String jsonValue = objectMapper.writeValueAsString(event);
-            var record = new ProducerRecord<>(topic, key, jsonValue);
-            return kafkaSender.send(Mono.just(SenderRecord.create(record, key)))
-                .doOnNext(r -> log.info("📤 Evento publicado en [{}]: key={}", topic, key))
+        return Mono.justOrEmpty(orderCreatedEvent)
+                .doOnNext(e -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), e}))
+                .flatMap(inventoryUseCase::reserveStock)
+                .doOnSuccess(v -> log.info("Stock reservation processed for event: " + event.getId()))
                 .then();
+    }
+
+    public Mono<Void> handlePaymentFailedEvent(CloudEvent event) {
+        Optional<PaymentFailedEvent> paymentFailedEvent = deserialize(event, PaymentFailedEvent.class);
+
+        return Mono.justOrEmpty(paymentFailedEvent)
+                .doOnNext(e -> log.log(Level.INFO, "Event received: {0} -> {1}", new Object[]{event.getType(), e}))
+                .flatMap(e -> inventoryUseCase.releaseStock(e.orderId(), e.sku(), e.quantity(), e.reason()))
+                .then();
+    }
+
+    private <T> Optional<T> deserialize(CloudEvent event, Class<T> clazz) {
+        if (event == null || event.getData() == null) {
+            log.warning("Received event with empty data");
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(objectMapper.readValue(event.getData().toBytes(), clazz));
         } catch (Exception e) {
-            return Mono.error(e);
+            log.log(Level.SEVERE, "Failed to deserialize event data to " + clazz.getSimpleName(), e);
+            throw new RuntimeException("Failed to map event data", e);
         }
     }
 }
 ```
 
-:::info Compensación simplificada
-En un sistema real, `ms-inventory` guardaría cada reserva en una tabla `stock_reservations` para saber exactamente qué devolver en la compensación. Para el lab, confiamos en que los eventos contienen la información necesaria.
-:::
+```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/inventory/events/HandlerRegistryConfiguration.java"
+package co.com.arka.inventory.events;
+
+import co.com.arka.inventory.events.config.KafkaBrokerSecretConsumer;
+import co.com.arka.inventory.events.handlers.EventsHandler;
+import lombok.RequiredArgsConstructor;
+import org.reactivecommons.async.api.HandlerRegistry;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+@RequiredArgsConstructor
+public class HandlerRegistryConfiguration {
+
+    private final KafkaBrokerSecretConsumer kafkaBrokerSecretConsumer;
+
+    @Bean
+    public HandlerRegistry handlerRegistry(EventsHandler events) {
+        return HandlerRegistry.register()
+                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().orderCreated(), events::handleOrderCreatedEvent)
+                .listenCloudEvent(kafkaBrokerSecretConsumer.topics().paymentFailed(), events::handlePaymentFailedEvent);
+    }
+}
+```
 
 ## 7.8 Entry Point — REST
 
@@ -734,7 +682,7 @@ ENTRYPOINT ["/bin/sh", "-c", "/opt/java/openjdk/bin/java $JAVA_OPTS -jar MsInven
         - PORT=${MS_INVENTORY_PORT}
     container_name: arka-ms-inventory
     ports:
-      - "${MS_INVENTORY_PORT}:${MS_INVENTORY_PORT}"
+      - "8082-8085:${MS_INVENTORY_PORT}"
     env_file:
       - .env
     depends_on:
@@ -753,6 +701,8 @@ ENTRYPOINT ["/bin/sh", "-c", "/opt/java/openjdk/bin/java $JAVA_OPTS -jar MsInven
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.inventory.rule=PathPrefix(`/inventory`)"
+      - "traefik.http.middlewares.inventory-stripprefix.stripprefix.prefixes=/inventory"
+      - "traefik.http.routers.inventory.middlewares=inventory-stripprefix"
       - "traefik.http.services.inventory.loadbalancer.server.port=${MS_INVENTORY_PORT}"
     networks:
       - arka-network
@@ -837,7 +787,7 @@ sequenceDiagram
         I->>DB: UPDATE stock = stock - qty
         I->>K: StockReservedEvent ✅
     else Sin stock
-        I->>K: StockReserveFailedEvent ❌
+        I->>K: StockFailedEvent ❌
     end
 
     Note over K: Esperando ms-payment...
@@ -855,4 +805,4 @@ sequenceDiagram
 
 ---
 
-**Siguiente:** [Módulo 8: ms-payment — Simulador & Circuit Breaker](./ms-payment-implementacion)
+**Siguiente:** [Módulo 8: ms-payment — Simulador HTTP](./ms-payment-implementacion)

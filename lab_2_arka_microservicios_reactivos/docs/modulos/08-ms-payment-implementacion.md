@@ -6,7 +6,7 @@ slug: ms-payment-implementacion
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Módulo 8: ms-payment — Simulador & Circuit Breaker
+# Módulo 8: ms-payment — Simulador HTTP
 
 :::tip Tiempo estimado
 ~1.5 horas
@@ -14,19 +14,15 @@ import TabItem from '@theme/TabItem';
 
 ## Objetivo
 
-Crear `ms-payment` — un **simulador** que aprueba el 70% de los pagos y rechaza el 30%, desencadenando la **compensación** de la SAGA. Además, implementaremos un **Circuit Breaker** (Resilience4j) en ms-orders para proteger llamadas HTTP síncronas.
+Crear `ms-payment` — un **simulador** que aprueba el 70% de los pagos y rechaza el 30%. El flujo es **HTTP sincrono**: `ms-orders` llama a `ms-payment` y decide si confirma la orden o publica `payment-failed` para compensar. El Circuit Breaker vive en `ms-orders`.
 
 ```mermaid
 flowchart LR
-    K{{Kafka}} -->|stock-reserved| PAY[ms-payment<br>:8083]
-    PAY -->|payment-processed<br>70%| K
-    PAY -->|payment-failed<br>30%| K
+    O[ms-orders] -->|HTTP + Circuit Breaker| PAY[ms-payment<br>:8083]
     PAY -->|R2DBC| DB[(db_payment)]
     SM[🔐 Secrets] -.->|credenciales| PAY
-    O[ms-orders] -->|HTTP + Circuit Breaker| PAY
 
     style PAY fill:#ff79c6,color:#282a36
-    style K fill:#bd93f9,color:#282a36
 ```
 
 ## 8.1 Crear el proyecto con Scaffold
@@ -50,7 +46,7 @@ gradle wrapper
   --type=reactive \
   --name=MsPayment \
   --lombok=true \
-  --java-version=21
+  --java-version=17
 
 ./gradlew gep --type webflux
 ./gradlew gda --type secrets --secrets-backend aws_secrets_manager
@@ -66,29 +62,7 @@ MS_PAYMENT_PORT=8083
 MS_PAYMENT_HOST=arka-ms-payment
 ```
 
-## 8.2 Eventos duplicados
-
-Solo necesitamos los eventos que ms-payment consume y publica:
-
-```java title="domain/model/src/main/java/co/com/arka/payment/model/events/StockReservedEvent.java"
-package co.com.arka.payment.model.events;
-
-public record StockReservedEvent(String orderId, String sku, Integer quantity) {}
-```
-
-```java title="domain/model/src/main/java/co/com/arka/payment/model/events/PaymentProcessedEvent.java"
-package co.com.arka.payment.model.events;
-
-public record PaymentProcessedEvent(String orderId, Double amount) {}
-```
-
-```java title="domain/model/src/main/java/co/com/arka/payment/model/events/PaymentFailedEvent.java"
-package co.com.arka.payment.model.events;
-
-public record PaymentFailedEvent(String orderId, String reason) {}
-```
-
-## 8.3 Modelo de Dominio — Payment
+## 8.2 Modelo de Dominio — Payment
 
 ```java title="domain/model/src/main/java/co/com/arka/payment/model/payment/Payment.java"
 package co.com.arka.payment.model.payment;
@@ -100,252 +74,74 @@ public class Payment {
     private String id;
     private String orderId;
     private Double amount;
-    private String status; // APPROVED, REJECTED
-    private String reason;
+    private String status; // PROCESSED, FAILED
+    private String paymentMethod;
+    private java.time.LocalDateTime processedAt;
 }
 ```
+## 8.3 Caso de uso — PaymentUseCase
 
-### BrokerSecret
+```java title="domain/usecase/src/main/java/co/com/arka/payment/usecase/payment/PaymentUseCase.java"
+package co.com.arka.payment.usecase.payment;
 
-```java title="domain/model/src/main/java/co/com/arka/payment/model/brokersecret/BrokerSecret.java"
-package co.com.arka.payment.model.brokersecret;
-
-import lombok.*;
-
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
-public class BrokerSecret {
-    private String bootstrapServers;
-    private String groupId;
-    private String autoOffsetReset;
-    private Topics topics;
-
-    @Data @NoArgsConstructor @AllArgsConstructor
-    public static class Topics {
-        private String orderCreated;
-        private String stockReserved;
-        private String stockReleased;
-        private String stockFailed;
-        private String paymentProcessed;
-        private String paymentFailed;
-        private String orderConfirmed;
-        private String orderCancelled;
-    }
-}
-```
-
-## 8.4 Infraestructura — Secrets + R2DBC
-
-:::info Mismo patrón
-La configuración de `SecretsConfig`, `PostgreSQLConnectionPool`, `OrderData` → `PaymentData`, y los adapters siguen exactamente el mismo patrón que ms-orders y ms-inventory. Solo cambiamos el package (`co.com.arka.payment`) y el secreto (`dev/arka/db-payment-creds`).
-:::
-
-### SecretsConfig
-
-```java title="applications/app-service/src/main/java/co/com/arka/payment/config/SecretsConfig.java"
-package co.com.arka.payment.config;
-
-import co.com.bancolombia.commons.secretsmanager.connector.clients.connector.AWSSecretManagerConnectorAsync;
-import co.com.bancolombia.commons.secretsmanager.manager.GenericManagerAsync;
-import co.com.arka.payment.model.brokersecret.BrokerSecret;
-import co.com.arka.payment.r2dbc.config.PostgresqlConnectionProperties;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
-
-import java.net.URI;
-
-@Configuration
-public class SecretsConfig {
-
-    @Value("${aws.endpoint}") private String awsEndpoint;
-    @Value("${aws.region}") private String awsRegion;
-    @Value("${aws.secrets.db-name}") private String dbSecretName;
-    @Value("${aws.secrets.kafka-name}") private String kafkaSecretName;
-
-    private GenericManagerAsync manager() {
-        return new GenericManagerAsync(
-            new AWSSecretManagerConnectorAsync(
-                Region.of(awsRegion),
-                URI.create(awsEndpoint),
-                DefaultCredentialsProvider.create()
-            )
-        );
-    }
-
-    @Bean
-    public PostgresqlConnectionProperties postgresqlConnectionProperties() {
-        return manager().getSecret(dbSecretName, PostgresqlConnectionProperties.class).block();
-    }
-
-    @Bean
-    public BrokerSecret brokerSecret() {
-        return manager().getSecret(kafkaSecretName, BrokerSecret.class).block();
-    }
-}
-```
-
-## 8.5 SAGA Listener — El Simulador
-
-Este es el corazón del simulador: escucha `StockReservedEvent` y decide aleatoriamente si el pago se aprueba o se rechaza.
-
-```java title="applications/app-service/src/main/java/co/com/arka/payment/config/PaymentSagaListener.java"
-package co.com.arka.payment.config;
-
-import co.com.arka.payment.model.brokersecret.BrokerSecret;
-import co.com.arka.payment.model.events.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
+import co.com.arka.payment.model.payment.Payment;
+import co.com.arka.payment.model.payment.gateways.PaymentRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.kafka.receiver.KafkaReceiver;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
 
-import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.concurrent.ThreadLocalRandom;
 
-@Slf4j
-@Component
 @RequiredArgsConstructor
-public class PaymentSagaListener {
+public class PaymentUseCase {
+    private static final double FAILURE_PROBABILITY = 0.30;
 
-    private final KafkaReceiver<String, String> kafkaReceiver;
-    private final KafkaSender<String, String> kafkaSender;
-    private final BrokerSecret brokerSecret;
-    private final ObjectMapper objectMapper;
+    private final PaymentRepository paymentRepository;
 
-    @PostConstruct
-    public void startListening() {
-        kafkaReceiver.receive()
-            .doOnNext(record -> {
-                try {
-                    var event = objectMapper.readValue(record.value(), StockReservedEvent.class);
-                    log.info("📨 StockReserved recibido para orden {}", event.orderId());
+    public Mono<Payment> processPayment(String orderId, Double amount, String paymentMethod) {
+        boolean approved = ThreadLocalRandom.current().nextDouble() >= FAILURE_PROBABILITY;
+        String status = approved ? "PROCESSED" : "FAILED";
 
-                    // highlight-start
-                    // Simular latencia de procesamiento
-                    Mono.delay(Duration.ofMillis(500))
-                        .flatMap(i -> {
-                            if (Math.random() > 0.3) {
-                                // ✅ 70% Éxito
-                                log.info("✅ Pago APROBADO para orden {}", event.orderId());
-                                var processed = new PaymentProcessedEvent(event.orderId(), 0.0);
-                                return sendEvent(
-                                    brokerSecret.getTopics().getPaymentProcessed(),
-                                    event.orderId(), processed
-                                );
-                            } else {
-                                // ❌ 30% Fallo
-                                log.info("❌ Pago RECHAZADO para orden {}", event.orderId());
-                                var failed = new PaymentFailedEvent(
-                                    event.orderId(), "Fondos insuficientes (simulado)"
-                                );
-                                return sendEvent(
-                                    brokerSecret.getTopics().getPaymentFailed(),
-                                    event.orderId(), failed
-                                );
-                            }
-                        })
-                        .subscribe();
-                    // highlight-end
-                } catch (Exception e) {
-                    log.error("❌ Error procesando evento: {}", e.getMessage());
-                }
+        Payment payment = Payment.builder()
+                .orderId(orderId)
+                .amount(amount)
+                .status(status)
+                .paymentMethod(paymentMethod)
+                .processedAt(LocalDateTime.now())
+                .build();
 
-                record.receiverOffset().acknowledge();
-            })
-            .subscribe();
+        return paymentRepository.save(payment);
     }
 
-    private <T> Mono<Void> sendEvent(String topic, String key, T event) {
-        try {
-            String json = objectMapper.writeValueAsString(event);
-            var record = new ProducerRecord<>(topic, key, json);
-            return kafkaSender.send(Mono.just(SenderRecord.create(record, key)))
-                .doOnNext(r -> log.info("📤 Evento publicado en [{}]", topic))
-                .then();
-        } catch (Exception e) {
-            return Mono.error(e);
-        }
+    public Mono<Payment> getPayment(String id) {
+        return paymentRepository.findById(id);
+    }
+
+    public Flux<Payment> getAllPayments() {
+        return paymentRepository.findAll();
     }
 }
 ```
 
-:::warning 70/30 Simulación
-El `Math.random() > 0.3` hace que el 70% de los pagos sean exitosos y el 30% fallen. Esto permite probar tanto el **happy path** como la **compensación** haciendo múltiples requests.
-:::
+## 8.4 API HTTP
 
-### Kafka Configs
+```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/payment/api/ProcessPaymentRequest.java"
+package co.com.arka.payment.api;
 
-```java title="applications/app-service/src/main/java/co/com/arka/payment/config/KafkaConsumerConfig.java"
-package co.com.arka.payment.config;
-
-import co.com.arka.payment.model.brokersecret.BrokerSecret;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import reactor.kafka.receiver.KafkaReceiver;
-import reactor.kafka.receiver.ReceiverOptions;
-
-import java.util.*;
-
-@Configuration
-public class KafkaConsumerConfig {
-
-    @Bean
-    public KafkaReceiver<String, String> kafkaReceiver(BrokerSecret brokerSecret) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerSecret.getBootstrapServers());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "payment-group");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, brokerSecret.getAutoOffsetReset());
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-
-        ReceiverOptions<String, String> options = ReceiverOptions.<String, String>create(props)
-            .subscription(List.of(brokerSecret.getTopics().getStockReserved()));
-
-        return KafkaReceiver.create(options);
-    }
+public record ProcessPaymentRequest(
+        String orderId,
+        Double amount,
+        String paymentMethod
+) {
 }
 ```
-
-```java title="applications/app-service/src/main/java/co/com/arka/payment/config/KafkaProducerConfig.java"
-package co.com.arka.payment.config;
-
-import co.com.arka.payment.model.brokersecret.BrokerSecret;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderOptions;
-
-import java.util.*;
-
-@Configuration
-public class KafkaProducerConfig {
-
-    @Bean
-    public KafkaSender<String, String> kafkaSender(BrokerSecret brokerSecret) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerSecret.getBootstrapServers());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        return KafkaSender.create(SenderOptions.create(props));
-    }
-}
-```
-
-## 8.6 REST — Health & Payments
 
 ```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/payment/api/Handler.java"
 package co.com.arka.payment.api;
 
+import co.com.arka.payment.model.payment.Payment;
+import co.com.arka.payment.usecase.payment.PaymentUseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
@@ -359,7 +155,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class Handler {
 
-    public Mono<ServerResponse> healthCheck(ServerRequest request) {
+    private final PaymentUseCase paymentUseCase;
+
+    public Mono<ServerResponse> healthCheck(ServerRequest serverRequest) {
         return ServerResponse.ok().bodyValue(Map.of(
                 "service", "ms-payment",
                 "status", "UP",
@@ -367,15 +165,26 @@ public class Handler {
         ));
     }
 
-    // Endpoint para Fraud Check (usado por Circuit Breaker de ms-orders)
-    public Mono<ServerResponse> fraudCheck(ServerRequest request) {
-        String userId = request.pathVariable("userId");
-        // Simulación: algunos users son "fraudulentos"
-        boolean isFraud = userId.contains("fraud");
-        return ServerResponse.ok().bodyValue(Map.of(
-                "userId", userId,
-                "isFraud", isFraud
-        ));
+    public Mono<ServerResponse> processPayment(ServerRequest serverRequest) {
+        return serverRequest.bodyToMono(ProcessPaymentRequest.class)
+                .flatMap(request -> paymentUseCase.processPayment(request.orderId(), request.amount(), request.paymentMethod()))
+                .flatMap(payment -> {
+                    if ("PROCESSED".equals(payment.getStatus())) {
+                        return ServerResponse.ok().bodyValue(payment);
+                    }
+                    return ServerResponse.status(402).bodyValue(payment);
+                });
+    }
+
+    public Mono<ServerResponse> getPayment(ServerRequest serverRequest) {
+        String id = serverRequest.pathVariable("id");
+        return paymentUseCase.getPayment(id)
+                .flatMap(payment -> ServerResponse.ok().bodyValue(payment))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+
+    public Mono<ServerResponse> getAllPayments(ServerRequest serverRequest) {
+        return ServerResponse.ok().body(paymentUseCase.getAllPayments(), Payment.class);
     }
 }
 ```
@@ -389,6 +198,7 @@ import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerResponse;
 
 import static org.springframework.web.reactive.function.server.RequestPredicates.GET;
+import static org.springframework.web.reactive.function.server.RequestPredicates.POST;
 import static org.springframework.web.reactive.function.server.RouterFunctions.route;
 
 @Configuration
@@ -396,11 +206,90 @@ public class RouterRest {
     @Bean
     public RouterFunction<ServerResponse> routerFunction(Handler handler) {
         return route(GET("/api/health"), handler::healthCheck)
-            .andRoute(GET("/api/fraud-check/{userId}"), handler::fraudCheck);
+                .andRoute(POST("/api/payments/process"), handler::processPayment)
+                .andRoute(GET("/api/payments/{id}"), handler::getPayment)
+                .andRoute(GET("/api/payments"), handler::getAllPayments);
     }
 }
 ```
 
+:::info Respuestas HTTP
+- `200 OK` cuando el pago es `PROCESSED`
+- `402 Payment Required` cuando el pago es `FAILED`
+:::
+
+## 8.5 Infraestructura — Secrets + R2DBC
+
+:::info Mismo patrón
+La configuración de `SecretsConfig`, `PostgreSQLConnectionPool`, `OrderData` → `PaymentData`, y los adapters siguen exactamente el mismo patrón que ms-orders y ms-inventory. Solo cambiamos el package (`co.com.arka.payment`) y el secreto (`dev/arka/db-payment-creds`).
+:::
+
+### SecretsConfig
+
+```java title="applications/app-service/src/main/java/co/com/arka/payment/config/SecretsConfig.java"
+package co.com.arka.payment.config;
+
+import co.com.arka.payment.events.config.KafkaBrokerSecretConsumer;
+import co.com.arka.payment.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.payment.r2dbc.config.PostgresqlConnectionProperties;
+import co.com.bancolombia.secretsmanager.api.GenericManagerAsync;
+import co.com.bancolombia.secretsmanager.api.exceptions.SecretException;
+import co.com.bancolombia.secretsmanager.config.AWSSecretsManagerConfig;
+import co.com.bancolombia.secretsmanager.connector.AWSSecretManagerConnectorAsync;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import reactor.core.publisher.Mono;
+import software.amazon.awssdk.regions.Region;
+
+@Slf4j
+@Configuration
+public class SecretsConfig {
+
+  @Value("${aws.secrets.db-name}")
+  private String dbSecretName;
+  @Value("${aws.secrets.kafka-name}")
+  private String kafkaSecretName;
+
+  @Bean
+  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region,
+                                              @Value("${aws.endpoint}") String endpoint) {
+    return new AWSSecretManagerConnectorAsync(getConfig(region, endpoint));
+  }
+
+  private AWSSecretsManagerConfig getConfig(String region, String endpoint) {
+    return AWSSecretsManagerConfig.builder()
+      .region(Region.of(region))
+      .endpoint(endpoint)
+      .cacheSize(5)
+      .cacheSeconds(3600)
+      .build();
+  }
+
+  private <T> Mono<T> getSecret(String secretName, Class<T> cls, GenericManagerAsync connector) throws SecretException {
+    return connector.getSecret(secretName, cls)
+            .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", secretName))
+            .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
+            .onErrorMap(e -> new RuntimeException("Error getting secret", e));
+  }
+
+  @Bean
+  public KafkaBrokerSecretProducer brokerSecretProducer(GenericManagerAsync connector) throws SecretException {
+    return getSecret(kafkaSecretName, KafkaBrokerSecretProducer.class, connector).block();
+  }
+
+  @Bean
+  public KafkaBrokerSecretConsumer brokerSecretConsumer(GenericManagerAsync connector) throws SecretException {
+    return getSecret(kafkaSecretName, KafkaBrokerSecretConsumer.class, connector).block();
+  }
+
+  @Bean
+  public PostgresqlConnectionProperties postgresqlSecret(GenericManagerAsync connector) throws SecretException {
+    return getSecret(dbSecretName, PostgresqlConnectionProperties.class, connector).block();
+  }
+}
+```
 ## 8.7 `application.yaml`
 
 ```yaml title="applications/app-service/src/main/resources/application.yaml"
@@ -412,13 +301,21 @@ spring:
     name: "MsPayment"
   devtools:
     add-properties: false
+  h2:
+    console:
+      enabled: true
+      path: "/h2"
+  profiles:
+    include: null
+  kafka:
+    bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
 
 aws:
   endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
   region: "${AWS_REGION:us-east-1}"
   secrets:
-    db-name: "dev/arka/db-payment-creds"
-    kafka-name: "dev/arka/kafka-config"
+    db-name: "${PAYMENT_DB_SECRET_NAME:dev/arka/db-payment-creds}"
+    kafka-name: "${KAFKA_CONFIG_SECRET_NAME:dev/arka/kafka-config}"
 
 management:
   endpoints:
@@ -429,6 +326,14 @@ management:
     health:
       probes:
         enabled: true
+cors:
+  allowed-origins: "http://localhost:4200,http://localhost:8080"
+reactive:
+  commons:
+    kafka:
+      app:
+        connectionProperties:
+          bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
 ```
 
 ## 8.8 Dockerfile
@@ -498,112 +403,6 @@ ENTRYPOINT ["/bin/sh", "-c", "/opt/java/openjdk/bin/java $JAVA_OPTS -jar MsPayme
       - arka-network
 ```
 
-## 8.10 Circuit Breaker — Resilience4j en ms-orders
-
-Ahora que ms-payment tiene un endpoint `/api/fraud-check/{userId}`, vamos a proteger la llamada HTTP desde ms-orders con un **Circuit Breaker**.
-
-### Paso 1: Agregar dependencia en ms-orders
-
-```groovy title="ms-orders/infrastructure/entry-points/reactive-web/build.gradle (agregar)"
-dependencies {
-    // ... existing
-    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-reactor-resilience4j:3.2.2'
-}
-```
-
-### Paso 2: Configuración en application.yaml de ms-orders
-
-```yaml title="ms-orders/applications/app-service/src/main/resources/application.yaml (agregar)"
-# ── Circuit Breaker ──
-resilience4j:
-  circuitbreaker:
-    instances:
-      paymentClient:
-        registerHealthIndicator: true
-        slidingWindowSize: 10
-        minimumNumberOfCalls: 5
-        permittedNumberOfCallsInHalfOpenState: 3
-        waitDurationInOpenState: 5s
-        failureRateThreshold: 50
-  timelimiter:
-    instances:
-      paymentClient:
-        timeoutDuration: 2s
-
-# URL de ms-payment (hostname Docker)
-services:
-  payment:
-    url: "http://${MS_PAYMENT_HOST:arka-ms-payment}:${MS_PAYMENT_PORT:8083}"
-```
-
-### Paso 3: PaymentClient con Circuit Breaker
-
-```java title="ms-orders/infrastructure/.../api/client/PaymentClient.java"
-package co.com.arka.orders.api.client;
-
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cloud.client.circuitbreaker.ReactiveCircuitBreaker;
-import org.springframework.cloud.client.circuitbreaker.ReactiveCircuitBreakerFactory;
-import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-
-import java.util.Map;
-
-@Slf4j
-@Component
-public class PaymentClient {
-
-    private final WebClient webClient;
-    private final ReactiveCircuitBreaker circuitBreaker;
-
-    public PaymentClient(
-            WebClient.Builder builder,
-            ReactiveCircuitBreakerFactory cbFactory,
-            @Value("${services.payment.url}") String paymentUrl) {
-        this.webClient = builder.baseUrl(paymentUrl).build();
-        this.circuitBreaker = cbFactory.create("paymentClient");
-    }
-
-    // highlight-start
-    @SuppressWarnings("unchecked")
-    public Mono<Boolean> checkFraud(String userId) {
-        return circuitBreaker.run(
-            webClient.get()
-                .uri("/api/fraud-check/{userId}", userId)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .map(response -> (Boolean) response.get("isFraud")),
-            throwable -> {
-                // Fallback: Si ms-payment está caído, asumimos NO fraude
-                log.warn("⚡ Circuit Breaker activado: {}", throwable.getMessage());
-                return Mono.just(false);
-            }
-        );
-    }
-    // highlight-end
-}
-```
-
-:::tip Circuit Breaker States
-
-```mermaid
-stateDiagram-v2
-    [*] --> CLOSED : Normal
-    CLOSED --> OPEN : ≥50% fallos en 10 llamadas
-    OPEN --> HALF_OPEN : Después de 5s
-    HALF_OPEN --> CLOSED : 3 llamadas exitosas
-    HALF_OPEN --> OPEN : Fallo detectado
-```
-
-| Estado | Comportamiento |
-|--------|---------------|
-| **CLOSED** | Todo funciona normal, las llamadas pasan |
-| **OPEN** | Todas las llamadas son rechazadas → ejecuta fallback |
-| **HALF_OPEN** | Permite 3 llamadas de prueba para verificar recuperación |
-:::
-
 ## 8.11 Construir y Probar
 
 ```bash
@@ -627,21 +426,6 @@ arka-ms-inventory     Up (healthy)
 arka-ms-payment       Up (healthy)     ← NUEVO
 ```
 
-### Probar el Circuit Breaker
-
-```bash
-# Fraud check normal
-curl http://localhost:8081/api/fraud-check/user-001 | python3 -m json.tool
-
-# Apagar ms-payment y probar el fallback
-docker compose stop ms-payment
-curl http://localhost:8081/api/fraud-check/user-001 | python3 -m json.tool
-# Debería responder con el fallback (isFraud: false)
-
-# Ver los logs del circuit breaker
-docker logs arka-ms-orders --tail 10
-```
-
 ## 8.12 ¿Qué acabamos de construir?
 
 ```mermaid
@@ -652,12 +436,12 @@ flowchart TB
         O -->|Kafka: order-created| K{{Kafka}}
         K -->|order-created| I[ms-inventory<br>:8082]
         I -->|stock-reserved| K
-        K -->|stock-reserved| P
-        P -->|payment-processed<br>70%| K
-        P -->|payment-failed<br>30%| K
-        K -->|payment-processed| O
-        K -->|payment-failed| O
+        K -->|stock-reserved| O
+        O -->|payment-failed| K
         K -->|payment-failed| I
+      I -->|stock-released| K
+      K -->|stock-released| O
+      O -->|order-confirmed / order-cancelled| K
 
         O --> DB1[(db_orders)]
         I --> DB2[(db_inventory)]
@@ -672,7 +456,6 @@ flowchart TB
 
 :::info Checkpoint
 - [ ] ¿Los 3 microservicios están `healthy`?
-- [ ] ¿El Circuit Breaker funciona cuando ms-payment está caído?
 - [ ] ¿Al crear una orden, se ve el flujo completo en KafkaUI?
 :::
 
