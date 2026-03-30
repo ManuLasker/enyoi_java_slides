@@ -176,30 +176,17 @@ public interface ProductRepository {
 }
 ```
 
-### BrokerSecret (mismo patrón)
+### Events Gateway (Interface Genérica)
 
-```java title="domain/model/src/main/java/co/com/arka/inventory/model/brokersecret/BrokerSecret.java"
-package co.com.arka.inventory.model.brokersecret;
+Esta interfaz define el contrato agnóstico para que el Caso de Uso emita eventos al exterior, sin acoplarse con la implementación de Kafka:
 
-import lombok.*;
+```java title="domain/model/src/main/java/co/com/arka/inventory/model/events/gateways/EventsGateway.java"
+package co.com.arka.inventory.model.events.gateways;
 
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
-public class BrokerSecret {
-    private String bootstrapServers;
-    private String groupId;
-    private String autoOffsetReset;
-    private Topics topics;
+import reactor.core.publisher.Mono;
 
-    @Data @NoArgsConstructor @AllArgsConstructor
-    public static class Topics {
-        private String orderCreated;
-        private String stockReserved;
-        private String stockReleased;
-        private String stockFailed;
-        private String paymentFailed;
-        private String orderConfirmed;
-        private String orderCancelled;
-    }
+public interface EventsGateway<T> {
+    Mono<Void> emit(T event);
 }
 ```
 
@@ -304,50 +291,129 @@ public class InventoryUseCase {
 
 Misma estructura que ms-orders:
 
+### KafkaBrokerSecretConsumer
+
+```java title="infrastructure/entry-points/async-event-handler/src/main/java/co/com/arka/inventory/events/config/KafkaBrokerSecretConsumer.java"
+package co.com.arka.inventory.events.config;
+
+import lombok.Builder;
+
+@Builder(toBuilder = true)
+public record KafkaBrokerSecretConsumer(
+        String bootstrapServers,
+        String groupId,
+        String autoOffsetReset,
+        Topics topics) {
+    @Builder(toBuilder = true)
+    public record Topics(
+            String orderCreated,
+            String stockReserved,
+            String stockReleased,
+            String stockFailed,
+            String paymentFailed,
+            String orderConfirmed,
+            String orderCancelled
+    ) {}
+}
+```
+
+### KafkaBrokerSecretProducer
+
+```java title="infrastructure/driven-adapters/async-event-bus/src/main/java/co/com/arka/inventory/events/config/KafkaBrokerSecretProducer.java"
+package co.com.arka.inventory.events.config;
+
+import lombok.Builder;
+
+@Builder(toBuilder = true)
+public record KafkaBrokerSecretProducer(
+        String bootstrapServers,
+        String groupId,
+        String autoOffsetReset,
+        Topics topics) {
+    @Builder(toBuilder = true)
+    public record Topics(
+            String orderCreated,
+            String stockReserved,
+            String stockReleased,
+            String stockFailed,
+            String paymentFailed,
+            String orderConfirmed,
+            String orderCancelled
+    ) {}
+}
+```
+
 ### SecretsConfig
 
 ```java title="applications/app-service/src/main/java/co/com/arka/inventory/config/SecretsConfig.java"
 package co.com.arka.inventory.config;
 
-import co.com.bancolombia.commons.secretsmanager.connector.clients.connector.AWSSecretManagerConnectorAsync;
-import co.com.bancolombia.commons.secretsmanager.manager.GenericManagerAsync;
-import co.com.arka.inventory.model.brokersecret.BrokerSecret;
+import co.com.arka.inventory.events.config.KafkaBrokerSecretConsumer;
+import co.com.arka.inventory.events.config.KafkaBrokerSecretProducer;
 import co.com.arka.inventory.r2dbc.config.PostgresqlConnectionProperties;
+import co.com.bancolombia.secretsmanager.api.GenericManagerAsync;
+import co.com.bancolombia.secretsmanager.api.exceptions.SecretException;
+import co.com.bancolombia.secretsmanager.config.AWSSecretsManagerConfig;
+import co.com.bancolombia.secretsmanager.connector.AWSSecretManagerConnectorAsync;
+import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.regions.Region;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 
-import java.net.URI;
-
+@Slf4j
 @Configuration
 public class SecretsConfig {
 
-    @Value("${aws.endpoint}") private String awsEndpoint;
-    @Value("${aws.region}") private String awsRegion;
-    @Value("${aws.secrets.db-name}") private String dbSecretName;
-    @Value("${aws.secrets.kafka-name}") private String kafkaSecretName;
+  @Bean
+  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region,
+                                              @Value("${aws.endpoint}") String endpoint) {
+    return new AWSSecretManagerConnectorAsync(getConfig(region, endpoint));
+  }
 
-    private GenericManagerAsync manager() {
-        return new GenericManagerAsync(
-            new AWSSecretManagerConnectorAsync(
-                Region.of(awsRegion),
-                URI.create(awsEndpoint),
-                DefaultCredentialsProvider.create()
-            )
-        );
-    }
+  @Bean
+  public PostgresqlConnectionProperties postgresqlConnectionProperties(
+          GenericManagerAsync secretManager,
+          @Value("${aws.secrets.db-name}") String dbSecretName) throws SecretException {
+    return secretManager.getSecret(dbSecretName, PostgresqlConnectionProperties.class)
+            .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", dbSecretName))
+            .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
+            .onErrorMap(e -> new RuntimeException("Error getting secret", e))
+            .block();
+  }
 
-    @Bean
-    public PostgresqlConnectionProperties postgresqlConnectionProperties() {
-        return manager().getSecret(dbSecretName, PostgresqlConnectionProperties.class).block();
-    }
+  @Bean
+  public KafkaBrokerSecretConsumer kafkaBrokerSecretConsumer(
+          GenericManagerAsync secretManager,
+          @Value("${aws.secrets.kafka-name}") String kafkaSecretName
+  ) throws SecretException {
+    return secretManager.getSecret(kafkaSecretName, KafkaBrokerSecretConsumer.class)
+            .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", kafkaSecretName))
+            .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
+            .onErrorMap(e -> new RuntimeException("Error getting secret", e))
+            .block();
+  }
 
-    @Bean
-    public BrokerSecret brokerSecret() {
-        return manager().getSecret(kafkaSecretName, BrokerSecret.class).block();
-    }
+  @Bean
+  public KafkaBrokerSecretProducer kafkaBrokerSecretProducer(
+          GenericManagerAsync secretManager,
+          @Value("${aws.secrets.kafka-name}") String kafkaSecretName
+  ) throws SecretException {
+    return secretManager.getSecret(kafkaSecretName, KafkaBrokerSecretProducer.class)
+            .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", kafkaSecretName))
+            .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
+            .onErrorMap(e -> new RuntimeException("Error getting secret", e))
+            .block();
+  }
+
+  private AWSSecretsManagerConfig getConfig(String region, String endpoint) {
+    return AWSSecretsManagerConfig.builder()
+      .region(Region.of(region))
+      .endpoint(endpoint)
+      .cacheSize(5) // TODO Set cache size
+      .cacheSeconds(3600) // TODO Set cache seconds
+      .build();
+  }
 }
 ```
 
@@ -467,7 +533,162 @@ public class PostgreSQLConnectionPool {
 }
 ```
 
-## 7.7 Consumo de eventos (async-event-handler)
+## 7.7 Emisión de eventos (async-event-bus)
+
+A diferencia de otros servicios, `ms-inventory` emite 3 tipos de eventos diferentes dependiendo de la disponibilidad de stock, de modo que delegamos cada uno a su propio Gateway de CloudEvents respectivo:
+
+### StockReservedEventsGateway
+
+```java title="infrastructure/driven-adapters/async-event-bus/src/main/java/co/com/arka/inventory/events/StockReservedEventsGateway.java"
+package co.com.arka.inventory.events;
+
+import co.com.arka.inventory.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.inventory.model.events.StockReservedEvent;
+import co.com.arka.inventory.model.events.gateways.EventsGateway;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.api.domain.DomainEventBus;
+import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+import reactor.core.publisher.Mono;
+import io.cloudevents.CloudEvent;
+import io.cloudevents.core.builder.CloudEventBuilder;
+import io.cloudevents.jackson.JsonCloudEventData;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.UUID;
+import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.logging.Level;
+
+import static reactor.core.publisher.Mono.from;
+
+@Log
+@RequiredArgsConstructor
+@EnableDomainEventBus
+public class StockReservedEventsGateway implements EventsGateway<StockReservedEvent> {
+    private final KafkaBrokerSecretProducer kafkaBrokerSecretProducer;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(StockReservedEvent event) {
+        String eventName = kafkaBrokerSecretProducer.topics().stockReserved();
+        log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+        CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+                .withId(UUID.randomUUID().toString())
+                .withSource(URI.create("https://reactive-commons.org/foos"))
+                .withType(eventName)
+                .withTime(OffsetDateTime.now())
+                .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+                .build();
+
+        return from(domainEventBus.emit(eventCloudEvent));
+    }
+}
+```
+
+### StockReleasedEventsGateway
+
+```java title="infrastructure/driven-adapters/async-event-bus/src/main/java/co/com/arka/inventory/events/StockReleasedEventsGateway.java"
+package co.com.arka.inventory.events;
+
+import co.com.arka.inventory.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.inventory.model.events.StockReleasedEvent;
+import co.com.arka.inventory.model.events.gateways.EventsGateway;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.api.domain.DomainEventBus;
+import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+import reactor.core.publisher.Mono;
+import io.cloudevents.CloudEvent;
+import io.cloudevents.core.builder.CloudEventBuilder;
+import io.cloudevents.jackson.JsonCloudEventData;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.UUID;
+import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.logging.Level;
+
+import static reactor.core.publisher.Mono.from;
+
+@Log
+@RequiredArgsConstructor
+@EnableDomainEventBus
+public class StockReleasedEventsGateway implements EventsGateway<StockReleasedEvent> {
+    private final KafkaBrokerSecretProducer kafkaBrokerSecretProducer;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(StockReleasedEvent event) {
+        String eventName = kafkaBrokerSecretProducer.topics().stockReleased();
+        log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+        CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+                .withId(UUID.randomUUID().toString())
+                .withSource(URI.create("https://reactive-commons.org/foos"))
+                .withType(eventName)
+                .withTime(OffsetDateTime.now())
+                .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+                .build();
+
+         return from(domainEventBus.emit(eventCloudEvent));
+    }
+}
+```
+
+### StockReserveFailedEventsGateway
+
+```java title="infrastructure/driven-adapters/async-event-bus/src/main/java/co/com/arka/inventory/events/StockReserveFailedEventsGateway.java"
+package co.com.arka.inventory.events;
+
+import co.com.arka.inventory.events.config.KafkaBrokerSecretProducer;
+import co.com.arka.inventory.model.events.StockReserveFailedEvent;
+import co.com.arka.inventory.model.events.gateways.EventsGateway;
+import io.cloudevents.CloudEvent;
+import io.cloudevents.jackson.JsonCloudEventData;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.java.Log;
+import org.reactivecommons.api.domain.DomainEventBus;
+import org.reactivecommons.async.impl.config.annotations.EnableDomainEventBus;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.ObjectMapper;
+import io.cloudevents.core.builder.CloudEventBuilder;
+
+import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+import java.util.logging.Level;
+
+import static reactor.core.publisher.Mono.from;
+
+@Log
+@RequiredArgsConstructor
+@EnableDomainEventBus
+public class StockReserveFailedEventsGateway implements EventsGateway<StockReserveFailedEvent> {
+    private final KafkaBrokerSecretProducer kafkaBrokerSecretProducer;
+    private final DomainEventBus domainEventBus;
+    private final ObjectMapper om;
+
+    @Override
+    public Mono<Void> emit(StockReserveFailedEvent event) {
+        String eventName = kafkaBrokerSecretProducer.topics().stockFailed();
+        log.log(Level.INFO, "Sending domain event: {0}: {1}", new String[]{eventName, event.toString()});
+        CloudEvent eventCloudEvent = CloudEventBuilder.v1()
+                .withId(UUID.randomUUID().toString())
+                .withSource(URI.create("https://reactive-commons.org/foos"))
+                .withType(eventName)
+                .withTime(OffsetDateTime.now())
+                .withData("application/json", JsonCloudEventData.wrap(om.valueToTree(event)))
+                .build();
+
+        return from(domainEventBus.emit(eventCloudEvent));
+    }
+}
+```
+
+## 7.8 Consumo de eventos (async-event-handler)
 
 En este lab no configuramos consumers manuales. Usamos **Reactive Commons** para consumir eventos desde Kafka.
 
@@ -560,7 +781,7 @@ public class HandlerRegistryConfiguration {
 package co.com.arka.inventory.api;
 
 import co.com.arka.inventory.model.product.Product;
-import co.com.arka.inventory.usecase.product.InventoryUseCase;
+import co.com.arka.inventory.usecase.inventory.InventoryUseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
@@ -772,7 +993,7 @@ curl -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "cust-001",
-    "sku": "GPU-RTX4090",
+    "sku": "GPU-RTX-004",
     "quantity": 1,
     "unitPrice": 1599.99
   }' | python3 -m json.tool

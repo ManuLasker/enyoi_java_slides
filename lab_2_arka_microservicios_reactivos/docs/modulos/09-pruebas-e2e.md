@@ -93,7 +93,7 @@ curl -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "cust-001",
-    "sku": "GPU-RTX4090",
+    "sku": "GPU-RTX-004",
     "quantity": 1,
     "unitPrice": 1599.99
   }' | python3 -m json.tool
@@ -132,7 +132,7 @@ Si el pago fue exitoso (70% probabilidad), deberías ver:
 ```
 ms-orders:     ✅ Evento publicado en [order-created]
 ms-inventory:  📨 Evento recibido de [order-created]
-ms-inventory:  📦 Stock reservado: SKU=GPU-RTX4090, restante=49
+ms-inventory:  📦 Stock reservado: SKU=GPU-RTX-004, restante=7
 ms-inventory:  ✅ StockReserved publicado
 ms-orders:     📨 Evento recibido de [stock-reserved]
 ms-payment:    ✅ Pago PROCESSED para orden abc-123
@@ -148,7 +148,7 @@ docker exec arka-db-orders psql -U arka -d db_orders \
 
 # Stock decrementado
 docker exec arka-db-inventory psql -U arka -d db_inventory \
-  -c "SELECT sku, stock FROM products WHERE sku = 'GPU-RTX4090';"
+  -c "SELECT sku, stock FROM products WHERE sku = 'GPU-RTX-004';"
 ```
 
 ### Verifica la orden por API
@@ -171,7 +171,7 @@ for i in {1..5}; do
     -H "Content-Type: application/json" \
     -d "{
       \"customerId\": \"cust-00$i\",
-      \"sku\": \"GPU-RTX4090\",
+      \"sku\": \"GPU-RTX-004\",
       \"quantity\": 1,
       \"unitPrice\": 1599.99
     }" | python3 -m json.tool
@@ -201,7 +201,7 @@ docker exec arka-db-orders psql -U arka -d db_orders \
 
 # Verificar que el stock volvió a subir tras compensación
 docker exec arka-db-inventory psql -U arka -d db_inventory \
-  -c "SELECT sku, stock FROM products WHERE sku = 'GPU-RTX4090';"
+  -c "SELECT sku, stock FROM products WHERE sku = 'GPU-RTX-004';"
 ```
 
 :::warning Verificación de consistencia
@@ -231,7 +231,7 @@ En KafkaUI, haz clic en cada topic para ver los mensajes individuales con su key
 Prueba el flujo completo a través del API Gateway:
 
 ```bash
-API_ID=$(awslocal apigateway get-rest-apis \
+API_ID=$(docker exec arka-localstack awslocal apigateway get-rest-apis \
   --region us-east-1 --query 'items[0].id' --output text)
 
 # Crear orden vía API Gateway
@@ -239,7 +239,7 @@ curl -X POST "https://${API_ID}.execute-api.localhost.localstack.cloud:4566/v1/o
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "cust-gateway",
-    "sku": "GPU-RTX4090",
+    "sku": "GPU-RTX-004",
     "quantity": 1,
     "unitPrice": 1599.99
   }' | python3 -m json.tool
@@ -260,7 +260,7 @@ curl -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "cust-cb",
-    "sku": "GPU-RTX4090",
+    "sku": "GPU-RTX-004",
     "quantity": 1,
     "unitPrice": 1599.99
   }' | python3 -m json.tool
@@ -318,7 +318,7 @@ Con 3 instancias de ms-inventory, Kafka distribuye las particiones del topic `or
 for i in {1..6}; do
   curl -s -X POST http://localhost:8081/api/orders \
     -H "Content-Type: application/json" \
-    -d "{\"customerId\": \"cust-$i\", \"sku\": \"GPU-RTX4090\", \"quantity\": 1, \"unitPrice\": 1599.99}"
+    -d "{\"customerId\": \"cust-$i\", \"sku\": \"GPU-RTX-004\", \"quantity\": 1, \"unitPrice\": 1599.99}"
   sleep 1
 done
 

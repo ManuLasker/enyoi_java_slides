@@ -472,22 +472,22 @@ REST APIs creadas en API Gateway:
 
 ```bash
 # Leer credenciales de BD de un servicio
-awslocal secretsmanager get-secret-value \
+docker exec arka-localstack awslocal secretsmanager get-secret-value \
   --secret-id dev/arka/db-inventory-creds \
   --region us-east-1 \
   --query SecretString \
   --output text | python3 -m json.tool
 
 # Leer la configuración de Kafka
-awslocal secretsmanager get-secret-value \
+docker exec arka-localstack awslocal secretsmanager get-secret-value \
   --secret-id dev/arka/kafka-config \
   --region us-east-1 \
   --query SecretString \
   --output text | python3 -m json.tool
 
 # Listar recursos del API Gateway
-API_ID=$(awslocal apigateway get-rest-apis --query 'items[0].id' --output text)
-awslocal apigateway get-resources --rest-api-id $API_ID --output table
+API_ID=$(docker exec arka-localstack awslocal apigateway get-rest-apis --query 'items[0].id' --output text)
+docker exec arka-localstack awslocal apigateway get-resources --rest-api-id $API_ID --output table
 ```
 
 :::tip ¿Por qué Secrets Manager en vez de variables de entorno?
