@@ -323,42 +323,32 @@ import co.com.arka.orders.model.order.Order;
 import co.com.arka.orders.model.order.gateways.OrderRepository;
 import co.com.arka.orders.model.payment.gateways.PaymentGateway;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RequiredArgsConstructor
 public class OrderUseCase {
     private final OrderRepository orderRepository;
-    private final EventsGateway<OrderCreatedEvent> orderCreatedEventEventsPublisher;
-    private final EventsGateway<OrderCancelledEvent> orderCancelledEventEventsPublisher;
-    private final EventsGateway<OrderConfirmedEvent> orderConfirmedEventEventsPublisher;
-    private final EventsGateway<PaymentFailedEvent> paymentFailedEventEventsPublisher;
     private final PaymentGateway paymentGateway;
+    private final EventsGateway<OrderCreatedEvent> orderCreatedEventGateway;
+    private final EventsGateway<OrderConfirmedEvent> orderConfirmedEventEventsGateway;
+    private final EventsGateway<OrderCancelledEvent> orderCancelledEventEventsGateway;
+    private final EventsGateway<PaymentFailedEvent> paymentFailedEventEventsGateway;
 
     public Mono<Order> createOrder(Order order) {
         order.setStatus("PENDING");
         order.setTotalAmount(order.getUnitPrice() * order.getQuantity());
         return orderRepository.save(order)
-                .flatMap(saved -> {
-                    var event = new OrderCreatedEvent(
-                            saved.getId(), saved.getSku(),
-                            saved.getQuantity(), saved.getTotalAmount()
+                .flatMap(orderSaved -> {
+                    var orderCreatedEvent = new OrderCreatedEvent(
+                        orderSaved.getId(),
+                        orderSaved.getSku(),
+                        orderSaved.getQuantity(),
+                        orderSaved.getTotalAmount()
                     );
-                    return orderCreatedEventEventsPublisher.emit(event)
-                            .thenReturn(saved);
-                });
-    }
-
-    public Mono<Order> confirmOrder(String orderId) {
-        return orderRepository.findById(orderId)
-                .flatMap(order -> {
-                    order.setStatus("CONFIRMED");
-                    return orderRepository.save(order)
-                            .flatMap(orderConfirmed -> {
-                                var event = new OrderConfirmedEvent(orderConfirmed.getId());
-                                return orderConfirmedEventEventsPublisher.emit(event)
-                                        .thenReturn(orderConfirmed);
-                            });
+                    return orderCreatedEventGateway.emit(orderCreatedEvent)
+                            .thenReturn(orderSaved);
                 });
     }
 
@@ -369,42 +359,72 @@ public class OrderUseCase {
                     return orderRepository.save(order)
                             .flatMap(orderCancelled -> {
                                 var event = new OrderCancelledEvent(orderCancelled.getId(), reason);
-                                return orderCancelledEventEventsPublisher.emit(event)
+                                return orderCancelledEventEventsGateway.emit(event)
                                         .thenReturn(orderCancelled);
                             });
                 });
+    }
+
+    public Mono<Order> confirmOrder(String orderId) {
+        return orderRepository.findById(orderId)
+                .flatMap(order -> {
+                    order.setStatus("CONFIRMED");
+                    return orderRepository.save(order)
+                            .flatMap(orderCancelled -> {
+                                var event = new OrderConfirmedEvent(orderCancelled.getId());
+                                return orderConfirmedEventEventsGateway.emit(event)
+                                        .thenReturn(orderCancelled);
+                            });
+                });
+    }
+
+
+    public Mono<Void> processPaymentForOrder(String orderId) {
+        return orderRepository.findById(orderId)
+                .flatMap(order -> paymentGateway.processPayment(order.getId(), order.getTotalAmount())
+                        .flatMap(approved -> approved
+                                ? confirmOrder(order.getId()).then()
+                                : publishPaymentFailed(order, "Payment rejected by provider"))
+                        .onErrorResume(ex -> publishPaymentFailed(order, "Payment gateway error: " + ex.getMessage())));
+    }
+
+    private Mono<Void> publishPaymentFailed(Order order, String reason) {
+        var failed = new PaymentFailedEvent(
+                order.getId(),
+                order.getSku(),
+                order.getQuantity(),
+                reason
+        );
+        return paymentFailedEventEventsGateway.emit(failed);
     }
 
     public Mono<Order> getOrder(String id) {
         return orderRepository.findById(id);
     }
 
-    public Mono<Void> processPaymentForOrder(String orderId) {
-      return orderRepository.findById(orderId)
-          .flatMap(order -> paymentGateway.processPayment(order.getId(), order.getTotalAmount())
-              .flatMap(approved -> approved
-                  ? confirmOrder(order.getId()).then()
-                  : publishPaymentFailed(order, "Payment rejected by provider"))
-              .onErrorResume(ex -> publishPaymentFailed(order, "Payment gateway error: " + ex.getMessage())));
-    }
-
-    private Mono<Void> publishPaymentFailed(Order order, String reason) {
-      var failed = new PaymentFailedEvent(
-          order.getId(),
-          order.getSku(),
-          order.getQuantity(),
-          reason
-      );
-      return paymentFailedEventEventsPublisher.emit(failed);
-    }
-
     public Flux<Order> getAllOrders() {
         return orderRepository.findAll();
     }
 }
+
 ```
 
 ## 6.5.1 Puerto y adapter HTTP de pagos
+
+### Dependencias del adaptador HTTP
+
+Si generaste este adaptador con el scaffold (`--type restconsumer`), asegúrate de agregar las dependencias de **Resilience4j** y **WebFlux**:
+
+```groovy title="infrastructure/driven-adapters/rest-consumer/build.gradle"
+dependencies {
+    implementation project(':model')
+    implementation 'org.springframework:spring-context'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.3.0'
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.3.0'
+    implementation 'io.micrometer:micrometer-core'
+}
+```
 
 ### Puerto de dominio
 
@@ -488,30 +508,26 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 @Configuration
 public class RestConsumerConfig {
+    @Value("${payment.base-url:http://localhost:8083}")
+    private String url;
 
-  private final String url;
+    @Bean
+    public WebClient getWebClient() {
+        return WebClient.builder()
+            .baseUrl(url)
+            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .clientConnector(getClientHttpConnector())
+            .build();
+    }
 
-  public RestConsumerConfig(@Value("${payment.base-url:http://localhost:8083}") String url) {
-    this.url = url;
-  }
-
-  @Bean
-  public WebClient getWebClient(WebClient.Builder builder) {
-    return builder
-        .baseUrl(url)
-        .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-        .clientConnector(getClientHttpConnector())
-        .build();
-  }
-
-  private ClientHttpConnector getClientHttpConnector() {
-    /*
-    If you require append SSL certificate self signed: this should be in the default cacerts truststore.
-    */
-    return new ReactorClientHttpConnector(HttpClient.create()
-            .compress(true)
-            .keepAlive(true));
-  }
+    private ClientHttpConnector getClientHttpConnector() {
+        /*
+        IF YO REQUIRE APPEND SSL CERTIFICATE SELF SIGNED: this should be in the default cacerts trustore
+        */
+        return new ReactorClientHttpConnector(HttpClient.create()
+                .compress(true)
+                .keepAlive(true));
+    }
 }
 ```
 
@@ -1126,15 +1142,16 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 public class Handler {
-
     private final OrderUseCase orderUseCase;
 
     public Mono<ServerResponse> healthCheck(ServerRequest serverRequest) {
-        return ServerResponse.ok().bodyValue(Map.of(
-                "service", "ms-orders",
-                "status", "UP",
-                "timestamp", LocalDateTime.now().toString()
-        ));
+        return ServerResponse.ok().bodyValue(
+                Map.of(
+                        "service", "ms-orders",
+                        "status", "UP",
+                        "timestamp", LocalDateTime.now().toString()
+                )
+        );
     }
 
     public Mono<ServerResponse> createOrder(ServerRequest serverRequest) {
@@ -1154,6 +1171,7 @@ public class Handler {
         return ServerResponse.ok().body(orderUseCase.getAllOrders(), Order.class);
     }
 }
+
 ```
 
 ### Router
@@ -1180,6 +1198,7 @@ public class RouterRest {
                 .andRoute(GET("/api/orders"), handler::getAllOrders);
     }
 }
+
 ```
 
 ## 6.11 Beans de aplicación
@@ -1254,24 +1273,24 @@ management:
   health:
     circuitbreakers:
       enabled: true
-cors:
-  allowed-origins: "http://localhost:4200,http://localhost:8080"
-aws:
-  endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
-  region: "${AWS_REGION:us-east-1}"
-  secrets:
-    db-name: "${ORDERS_DB_SECRET_NAME:dev/arka/db-orders-creds}"
-    kafka-name: "${KAFKA_CONFIG_SECRET_NAME:dev/arka/kafka-config}"
 reactive:
   commons:
     kafka:
       app:
         connectionProperties:
           bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
+cors:
+  allowed-origins: "*"
+aws:
+  endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
+  region: "${AWS_REGION:us-east-1}"
+  secrets:
+    db-name: "${ORDERS_DB_SECRET_NAME:dev/arka/db-orders-creds}"
+    kafka-name: "${KAFKA_CONFIG_SECRET_NAME:dev/arka/kafka-config}"
 payment:
   base-url: "${MS_PAYMENT_BASE_URL:http://localhost:8083}"
   process-path: "${MS_PAYMENT_PROCESS_PATH:/api/payments/process}"
-  timeout-seconds: "${MS_PAYMENT_TIMEOUT_SECONDS:3}"
+  timeout-milli: "${MS_PAYMENT_TIMEOUT_MILLI:3000}"
 resilience4j:
   circuitbreaker:
     instances:
@@ -1280,10 +1299,6 @@ resilience4j:
         minimum-number-of-calls: "${MS_PAYMENT_CB_MIN_CALLS:5}"
         failure-rate-threshold: "${MS_PAYMENT_CB_FAILURE_RATE:50}"
         wait-duration-in-open-state: "${MS_PAYMENT_CB_OPEN_WAIT_SECONDS:20s}"
-adapter:
-  restconsumer:
-    timeout: 5000
-    url: "http://localhost:8080/api/payments/process"
 ```
 
 ## 6.13 Levantar y probar

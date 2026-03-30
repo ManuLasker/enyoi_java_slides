@@ -65,14 +65,13 @@ LOCALSTACK_PORT=4566
 LOCALSTACK_HOST=arka-localstack
 MS_ORDERS_PORT=8081
 MS_ORDERS_HOST=arka-ms-orders
-MS_INVENTORY_PORT=8082
-MS_INVENTORY_HOST=arka-ms-inventory
-MS_PAYMENT_PORT=8083
-MS_PAYMENT_HOST=arka-ms-payment
-MS_PAYMENT_BASE_URL=http://arka-ms-payment:8083
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
 AWS_REGION=us-east-1
+MS_PAYMENT_PORT=8083
+MS_PAYMENT_HOST=arka-ms-payment
+MS_INVENTORY_PORT=8082
+MS_INVENTORY_HOST=arka-ms-inventory
 ```
 
 :::tip ¿Por qué usar `.env`?
@@ -277,15 +276,13 @@ services:
         condition: service_healthy
     command: >
       bash -c "
-      echo '══════════════ Creando topics SAGA ══════════════' &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-created --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-reserved --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-released --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment-failed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-confirmed --partitions 3 --replication-factor 1 &&
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order-cancelled --partitions 3 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1 &&
-      echo '═════════════════════════════════════════════════'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-failed --partitions 3 --replication-factor 1
       "
     networks:
       - arka-network
@@ -313,10 +310,16 @@ services:
     image: localstack/localstack:latest
     container_name: arka-localstack
     ports:
-      - "${LOCALSTACK_PORT}:${LOCALSTACK_PORT}"
+      # - "${LOCALSTACK_PORT}:${LOCALSTACK_PORT}"
+      - "4566:4566"           # Gateway unificado
+      - "4510-4559:4510-4559" # Rango de servicios externos
     environment:
-      - DEBUG=0
       - SERVICES=secretsmanager,apigateway,cloudformation
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DEFAULT_REGION=us-east-1
+      - CFN_IGNORE_UNSUPPORTED_RESOURCE_TYPES=1
+      - LOCALSTACK_ACKNOWLEDGE_ACCOUNT_REQUIREMENT=1
     env_file:
       - .env
     volumes:

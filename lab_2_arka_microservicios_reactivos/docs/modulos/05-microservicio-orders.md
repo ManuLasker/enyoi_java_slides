@@ -53,7 +53,7 @@ MS_ORDERS_PORT=8081
 MS_ORDERS_HOST=arka-ms-orders
 MS_PAYMENT_PORT=8083
 MS_PAYMENT_HOST=arka-ms-payment
-MS_PAYMENT_BASE_URL=http://arka-ms-payment:8083
+MS_PAYMENT_BASE_URL=http://ms-payment:8083
 ```
 
 ## 5.3 Crear el proyecto con el Scaffold
@@ -251,10 +251,12 @@ En este modulo puedes omitir temporalmente el bloque `depends_on: ms-payment` y 
     container_name: arka-ms-orders
     ports:
       - "${MS_ORDERS_PORT}:${MS_ORDERS_PORT}"
+    environment:
+      - MS_PAYMENT_BASE_URL=http://${MS_PAYMENT_HOST}:${MS_PAYMENT_PORT}
+      - MS_PAYMENT_PROCESS_PATH=/api/payments/process
+      - MS_PAYMENT_TIMEOUT_SECONDS=3
     env_file:
       - .env
-    environment:
-      - MS_PAYMENT_BASE_URL=http://arka-ms-payment:${MS_PAYMENT_PORT:-8083}
     depends_on:
       postgres-orders:
         condition: service_healthy

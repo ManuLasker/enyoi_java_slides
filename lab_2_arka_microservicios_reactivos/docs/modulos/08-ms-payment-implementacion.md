@@ -96,7 +96,6 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class PaymentUseCase {
     private static final double FAILURE_PROBABILITY = 0.30;
-
     private final PaymentRepository paymentRepository;
 
     public Mono<Payment> processPayment(String orderId, Double amount, String paymentMethod) {
@@ -126,17 +125,6 @@ public class PaymentUseCase {
 
 ## 8.4 API HTTP
 
-```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/payment/api/ProcessPaymentRequest.java"
-package co.com.arka.payment.api;
-
-public record ProcessPaymentRequest(
-        String orderId,
-        Double amount,
-        String paymentMethod
-) {
-}
-```
-
 ```java title="infrastructure/entry-points/reactive-web/src/main/java/co/com/arka/payment/api/Handler.java"
 package co.com.arka.payment.api;
 
@@ -154,8 +142,7 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 public class Handler {
-
-    private final PaymentUseCase paymentUseCase;
+    private  final PaymentUseCase paymentUseCase;
 
     public Mono<ServerResponse> healthCheck(ServerRequest serverRequest) {
         return ServerResponse.ok().bodyValue(Map.of(
@@ -164,10 +151,9 @@ public class Handler {
                 "timestamp", LocalDateTime.now().toString()
         ));
     }
-
     public Mono<ServerResponse> processPayment(ServerRequest serverRequest) {
         return serverRequest.bodyToMono(ProcessPaymentRequest.class)
-                .flatMap(request -> paymentUseCase.processPayment(request.orderId(), request.amount(), request.paymentMethod()))
+                .flatMap(request -> paymentUseCase.processPayment(request.orderId(), request.amount(), "DEFAULT"))
                 .flatMap(payment -> {
                     if ("PROCESSED".equals(payment.getStatus())) {
                         return ServerResponse.ok().bodyValue(payment);
@@ -185,6 +171,12 @@ public class Handler {
 
     public Mono<ServerResponse> getAllPayments(ServerRequest serverRequest) {
         return ServerResponse.ok().body(paymentUseCase.getAllPayments(), Payment.class);
+    }
+
+    public record ProcessPaymentRequest(
+            String orderId,
+            Double amount
+    ) {
     }
 }
 ```
@@ -208,8 +200,7 @@ public class RouterRest {
         return route(GET("/api/health"), handler::healthCheck)
                 .andRoute(POST("/api/payments/process"), handler::processPayment)
                 .andRoute(GET("/api/payments/{id}"), handler::getPayment)
-                .andRoute(GET("/api/payments"), handler::getAllPayments);
-    }
+                .andRoute(GET("/api/payments"), handler::getAllPayments);    }
 }
 ```
 
@@ -220,51 +211,30 @@ public class RouterRest {
 
 ## 8.5 Infraestructura — Secrets + R2DBC
 
-:::info Mismo patrón
-La configuración de `SecretsConfig`, `PostgreSQLConnectionPool`, `OrderData` → `PaymentData`, y los adapters siguen exactamente el mismo patrón que ms-orders y ms-inventory. Solo cambiamos el package (`co.com.arka.payment`) y el secreto (`dev/arka/db-payment-creds`).
-:::
-
-### SecretsConfig
+### Configuración de Secretos
 
 ```java title="applications/app-service/src/main/java/co/com/arka/payment/config/SecretsConfig.java"
 package co.com.arka.payment.config;
 
-import co.com.arka.payment.events.config.KafkaBrokerSecretConsumer;
-import co.com.arka.payment.events.config.KafkaBrokerSecretProducer;
 import co.com.arka.payment.r2dbc.config.PostgresqlConnectionProperties;
 import co.com.bancolombia.secretsmanager.api.GenericManagerAsync;
 import co.com.bancolombia.secretsmanager.api.exceptions.SecretException;
 import co.com.bancolombia.secretsmanager.config.AWSSecretsManagerConfig;
 import co.com.bancolombia.secretsmanager.connector.AWSSecretManagerConnectorAsync;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+import software.amazon.awssdk.regions.Region;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import reactor.core.publisher.Mono;
-import software.amazon.awssdk.regions.Region;
 
 @Slf4j
 @Configuration
 public class SecretsConfig {
 
-  @Value("${aws.secrets.db-name}")
-  private String dbSecretName;
-  @Value("${aws.secrets.kafka-name}")
-  private String kafkaSecretName;
-
   @Bean
-  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region,
-                                              @Value("${aws.endpoint}") String endpoint) {
+  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region, @Value("${aws.endpoint}") String endpoint) {
     return new AWSSecretManagerConnectorAsync(getConfig(region, endpoint));
-  }
-
-  private AWSSecretsManagerConfig getConfig(String region, String endpoint) {
-    return AWSSecretsManagerConfig.builder()
-      .region(Region.of(region))
-      .endpoint(endpoint)
-      .cacheSize(5)
-      .cacheSeconds(3600)
-      .build();
   }
 
   private <T> Mono<T> getSecret(String secretName, Class<T> cls, GenericManagerAsync connector) throws SecretException {
@@ -275,19 +245,140 @@ public class SecretsConfig {
   }
 
   @Bean
-  public KafkaBrokerSecretProducer brokerSecretProducer(GenericManagerAsync connector) throws SecretException {
-    return getSecret(kafkaSecretName, KafkaBrokerSecretProducer.class, connector).block();
-  }
-
-  @Bean
-  public KafkaBrokerSecretConsumer brokerSecretConsumer(GenericManagerAsync connector) throws SecretException {
-    return getSecret(kafkaSecretName, KafkaBrokerSecretConsumer.class, connector).block();
-  }
-
-  @Bean
-  public PostgresqlConnectionProperties postgresqlSecret(GenericManagerAsync connector) throws SecretException {
+  public PostgresqlConnectionProperties postgresqlSecret(GenericManagerAsync connector,
+                                                         @Value("${aws.secrets.db-name}") String dbSecretName)
+          throws SecretException {
     return getSecret(dbSecretName, PostgresqlConnectionProperties.class, connector).block();
   }
+
+  private AWSSecretsManagerConfig getConfig(String region, String endpoint) {
+    return AWSSecretsManagerConfig.builder()
+      .region(Region.of(region))
+      .endpoint(endpoint)
+      .cacheSize(5) 
+      .cacheSeconds(3600) 
+      .build();
+  }
+}
+```
+
+### Entidad R2DBC
+
+```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/payment/r2dbc/entity/PaymentData.java"
+package co.com.arka.payment.r2dbc.entity;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Table;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder(toBuilder = true)
+@Table("payments")
+public class PaymentData {
+    @Id
+    private String id;
+    private String orderId;
+    private Double amount;
+    private String status;
+    private String paymentMethod;
+    private java.time.LocalDateTime processedAt;
+}
+```
+
+### Repositorio DB y Adapter
+
+```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/payment/r2dbc/PaymentReactiveRepository.java"
+package co.com.arka.payment.r2dbc;
+
+import co.com.arka.payment.r2dbc.entity.PaymentData;
+import org.springframework.data.repository.query.ReactiveQueryByExampleExecutor;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+
+public interface PaymentReactiveRepository extends ReactiveCrudRepository<PaymentData, String>, ReactiveQueryByExampleExecutor<PaymentData> {
+}
+```
+
+```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/payment/r2dbc/PaymentReactiveRepositoryAdapter.java"
+package co.com.arka.payment.r2dbc;
+
+import co.com.arka.payment.model.payment.Payment;
+import co.com.arka.payment.model.payment.gateways.PaymentRepository;
+import co.com.arka.payment.r2dbc.entity.PaymentData;
+import co.com.arka.payment.r2dbc.helper.ReactiveAdapterOperations;
+import org.reactivecommons.utils.ObjectMapper;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public class PaymentReactiveRepositoryAdapter extends ReactiveAdapterOperations<
+    Payment,
+    PaymentData,
+    String,
+    PaymentReactiveRepository
+> implements PaymentRepository {
+    public PaymentReactiveRepositoryAdapter(PaymentReactiveRepository repository, ObjectMapper mapper) {
+        super(repository, mapper, d -> mapper.map(d, Payment.class));
+    }
+}
+```
+
+### PostgreSQL Connection Pool
+
+```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/payment/r2dbc/config/PostgresqlConnectionProperties.java"
+package co.com.arka.payment.r2dbc.config;
+
+public record PostgresqlConnectionProperties(
+        String host,
+        Integer port,
+        String database,
+        String username,
+        String password) {
+}
+```
+
+```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/payment/r2dbc/config/PostgreSQLConnectionPool.java"
+package co.com.arka.payment.r2dbc.config;
+
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.pool.ConnectionPoolConfiguration;
+import io.r2dbc.postgresql.PostgresqlConnectionConfiguration;
+import io.r2dbc.postgresql.PostgresqlConnectionFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.time.Duration;
+
+@Configuration
+public class PostgreSQLConnectionPool {
+    public static final int INITIAL_SIZE = 12;
+    public static final int MAX_SIZE = 15;
+    public static final int MAX_IDLE_TIME = 30;
+
+    @Bean
+    public ConnectionPool getConnectionConfig(PostgresqlConnectionProperties properties) {
+        PostgresqlConnectionConfiguration dbConfiguration = PostgresqlConnectionConfiguration.builder()
+                .host(properties.host())
+                .port(properties.port())
+                .database(properties.database())
+                .username(properties.username())
+                .password(properties.password())
+                .build();
+
+        ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder()
+                .connectionFactory(new PostgresqlConnectionFactory(dbConfiguration))
+                .name("api-postgres-connection-pool")
+                .initialSize(INITIAL_SIZE)
+                .maxSize(MAX_SIZE)
+                .maxIdleTime(Duration.ofMinutes(MAX_IDLE_TIME))
+                .validationQuery("SELECT 1")
+                .build();
+
+        return new ConnectionPool(poolConfiguration);
+    }
 }
 ```
 ## 8.7 `application.yaml`
@@ -295,7 +386,6 @@ public class SecretsConfig {
 ```yaml title="applications/app-service/src/main/resources/application.yaml"
 server:
   port: ${MS_PAYMENT_PORT:8083}
-
 spring:
   application:
     name: "MsPayment"
@@ -307,16 +397,6 @@ spring:
       path: "/h2"
   profiles:
     include: null
-  kafka:
-    bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
-
-aws:
-  endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
-  region: "${AWS_REGION:us-east-1}"
-  secrets:
-    db-name: "${PAYMENT_DB_SECRET_NAME:dev/arka/db-payment-creds}"
-    kafka-name: "${KAFKA_CONFIG_SECRET_NAME:dev/arka/kafka-config}"
-
 management:
   endpoints:
     web:
@@ -328,12 +408,11 @@ management:
         enabled: true
 cors:
   allowed-origins: "http://localhost:4200,http://localhost:8080"
-reactive:
-  commons:
-    kafka:
-      app:
-        connectionProperties:
-          bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"
+aws:
+  endpoint: "http://${LOCALSTACK_HOST:localhost}:${LOCALSTACK_PORT:4566}"
+  region: "${AWS_REGION:us-east-1}"
+  secrets:
+    db-name: "${PAYMENT_DB_SECRET_NAME:dev/arka/db-payment-creds}"
 ```
 
 ## 8.8 Dockerfile

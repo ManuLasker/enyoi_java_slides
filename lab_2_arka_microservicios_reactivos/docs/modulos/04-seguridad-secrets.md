@@ -148,12 +148,10 @@ import co.com.arka.secretpoc.model.order.Order;
 import reactor.core.publisher.Mono;
 
 public interface OrderRepository {
-    // The contract for saving an order
     Mono<Order> save(Order order);
-
-    // The contract for finding an order
     Mono<Order> findById(String id);
 }
+
 ```
 
 ### 4.3.3 Modelo de secreto de Kafka
@@ -183,6 +181,7 @@ public class BrokerSecret {
         private String orderCreated;
         private String stockReserved;
         private String stockReleased;
+        private String paymentProcessed;
         private String paymentFailed;
         private String orderConfirmed;
         private String orderCancelled;
@@ -208,7 +207,6 @@ import co.com.bancolombia.secretsmanager.api.exceptions.SecretException;
 import co.com.bancolombia.secretsmanager.config.AWSSecretsManagerConfig;
 import co.com.bancolombia.secretsmanager.connector.AWSSecretManagerConnectorAsync;
 import lombok.extern.slf4j.Slf4j;
-import reactor.core.publisher.Mono;
 import software.amazon.awssdk.regions.Region;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -218,45 +216,45 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class SecretsConfig {
 
-  @Value("${aws.endpoint}")
-  public String awsEndpoint;
+  /*
+    Use GenericManagerAsync bean in your reactive pipe.
+    connector.getSecret("mySecretName", SecretModel.class).map(...);
+  */
 
   @Bean
-  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region) {
-    return new AWSSecretManagerConnectorAsync(getConfig(region));
+  public GenericManagerAsync getSecretManager(@Value("${aws.region}") String region,
+                                              @Value("${aws.endpoint}") String endpoint) {
+    return new AWSSecretManagerConnectorAsync(getConfig(region, endpoint));
   }
 
-  private <T> Mono<T> getSecret(String secretName, Class<T> cls, GenericManagerAsync connector)
-      throws SecretException {
-    return connector.getSecret(secretName, cls)
+  @Bean
+  public PostgresqlConnectionProperties getOrdersDbSecret(@Value("${aws.secrets.db-name}") String secretName,
+                                                          GenericManagerAsync secretManager) throws SecretException {
+    return secretManager.getSecret(secretName, PostgresqlConnectionProperties.class)
             .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", secretName))
             .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
-            .onErrorMap(e -> new RuntimeException("Error getting secret", e));
+            .block();
   }
 
   @Bean
-  public PostgresqlConnectionProperties getSecretPostgres(
-      GenericManagerAsync connector,
-      @Value("${aws.secrets.db-name}") String dbSecretsName) throws SecretException {
-    return getSecret(dbSecretsName, PostgresqlConnectionProperties.class, connector).block();
+  public BrokerSecret getBrokerSecret(@Value("${aws.secrets.kafka-name}") String secretName,
+                                        GenericManagerAsync secretManager) throws SecretException {
+    return secretManager.getSecret(secretName, BrokerSecret.class)
+            .doOnSuccess(e -> log.info("Secret was obtained successfully: {}", secretName))
+            .doOnError(e -> log.error("Error getting secret: {}", e.getMessage()))
+            .block();
   }
 
-  @Bean
-  public BrokerSecret getBrokerSecret(
-      GenericManagerAsync connector,
-      @Value("${aws.secrets.kafka-name}") String brokerSecretName) throws SecretException {
-    return getSecret(brokerSecretName, BrokerSecret.class, connector).block();
-  }
-
-  private AWSSecretsManagerConfig getConfig(String region) {
+  private AWSSecretsManagerConfig getConfig(String region, String endpoint) {
     return AWSSecretsManagerConfig.builder()
       .region(Region.of(region))
-      .endpoint(awsEndpoint)
-      .cacheSize(5)
-      .cacheSeconds(3600)
+      .endpoint(endpoint)
+      .cacheSize(5) // TODO Set cache size
+      .cacheSeconds(3600) // TODO Set cache seconds
       .build();
   }
 }
+
 ```
 
 :::info ¿Qué hace `GenericManagerAsync`?
@@ -275,7 +273,6 @@ El scaffold generó las clases de R2DBC. Crea la entidad que mapea a la tabla `o
 ```java title="infrastructure/driven-adapters/r2dbc-postgresql/src/main/java/co/com/arka/secretpoc/r2dbc/entity/OrderData.java"
 package co.com.arka.secretpoc.r2dbc.entity;
 
-
 import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
@@ -284,7 +281,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@Table(name = "orders")
+@Table("orders")
 public class OrderData {
     @Id
     private String id;
@@ -295,6 +292,7 @@ public class OrderData {
     private String status;
     private LocalDateTime createdAt;
 }
+
 ```
 
 ## 4.6 Repositorio reactivo y adaptador
@@ -308,10 +306,11 @@ import co.com.arka.secretpoc.r2dbc.entity.OrderData;
 import org.springframework.data.repository.query.ReactiveQueryByExampleExecutor;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 
-public interface OrderReactiveRepository extends ReactiveCrudRepository<OrderData, String>,
-    ReactiveQueryByExampleExecutor<OrderData> {
+// TODO: This file is just an example, you should delete or modify it
+public interface OrderReactiveRepository extends ReactiveCrudRepository<OrderData, String>, ReactiveQueryByExampleExecutor<OrderData> {
 
 }
+
 ```
 
 ### 4.6.2 Adaptador (implementación del Gateway)
@@ -328,16 +327,22 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class OrderReactiveRepositoryAdapter extends ReactiveAdapterOperations<
-    Order,
-    OrderData,
-    String,
-    OrderReactiveRepository
+        Order/* change for domain model */,
+        OrderData/* change for adapter model */,
+        String,
+        OrderReactiveRepository
 > implements OrderRepository {
     public OrderReactiveRepositoryAdapter(OrderReactiveRepository repository, ObjectMapper mapper) {
-        super(repository, mapper, d -> mapper.map(d, Order.class));
+        /**
+         *  Could be use mapper.mapBuilder if your domain model implement builder pattern
+         *  super(repository, mapper, d -> mapper.mapBuilder(d,ObjectModel.ObjectModelBuilder.class).build());
+         *  Or using mapper.map with the class of the object model
+         */
+        super(repository, mapper, d -> mapper.map(d, Order.class/* change for domain model */));
     }
 
 }
+
 ```
 
 :::info `ReactiveAdapterOperations`
@@ -355,6 +360,7 @@ import co.com.arka.secretpoc.model.brokersecret.BrokerSecret;
 import co.com.arka.secretpoc.model.order.Order;
 import co.com.arka.secretpoc.model.order.gateways.OrderRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
@@ -363,26 +369,31 @@ import reactor.core.publisher.Mono;
 @Component
 @RequiredArgsConstructor
 public class Handler {
-    private final OrderRepository orderRepository;
     private final BrokerSecret brokerSecret;
+    private final OrderRepository orderRepository;
 
     public Mono<ServerResponse> secretsKafkaGet(ServerRequest serverRequest) {
-        return ServerResponse.ok().bodyValue(brokerSecret);
+        return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).bodyValue(brokerSecret);
     }
 
     public Mono<ServerResponse> saveOrder(ServerRequest serverRequest) {
         return serverRequest.bodyToMono(Order.class)
                 .flatMap(orderRepository::save)
-                .flatMap(savedOrder -> ServerResponse.ok().bodyValue(savedOrder));
+                .flatMap(savedOrder -> ServerResponse.ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(savedOrder));
     }
 
     public Mono<ServerResponse> getOrderById(ServerRequest serverRequest) {
-        String orderId = serverRequest.pathVariable("id");
-        return orderRepository.findById(orderId)
-                .flatMap(order -> ServerResponse.ok().bodyValue(order))
+        String id = serverRequest.pathVariable("id");
+        return orderRepository.findById(id)
+                .flatMap(order -> ServerResponse.ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(order))
                 .switchIfEmpty(ServerResponse.notFound().build());
     }
 }
+
 ```
 
 ### 4.7.2 Router
@@ -405,9 +416,10 @@ public class RouterRest {
     public RouterFunction<ServerResponse> routerFunction(Handler handler) {
         return route(GET("/api/secrets/kafka"), handler::secretsKafkaGet)
                 .andRoute(POST("/api/orders"), handler::saveOrder)
-                .andRoute(GET("/api/orders/{id}"), handler::getOrderById);
+                .and(route(GET("/api/orders/{id}"), handler::getOrderById));
     }
 }
+
 ```
 
 **Endpoints disponibles:**
@@ -505,7 +517,7 @@ set -euo pipefail
 
 IMAGE_NAME="arka-secrets-poc"
 CONTAINER_NAME="arka-secrets-poc"
-NETWORK_NAME="arka-lab_arka-network"
+NETWORK_NAME="arka-system-simple-lab_arka-network"
 PORT=8900
 
 echo "══════════════════════════════════════════="

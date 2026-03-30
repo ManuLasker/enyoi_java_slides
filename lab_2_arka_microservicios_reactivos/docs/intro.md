@@ -37,8 +37,12 @@ flowchart TD
     ORDERS -->|publish OrderCreated| KAFKA["📮 Kafka"]
 
     KAFKA -->|consume OrderCreated| INVENTORY["📦 ms-inventory<br>(3 réplicas)"]
-    INVENTORY -->|publish StockReserved| KAFKA
-    KAFKA -->|consume StockReserved| ORDERS
+    INVENTORY -->|publish StockReserved / StockFailed| KAFKA
+    KAFKA -->|consume StockReserved / StockFailed| ORDERS
+
+    ORDERS -->|publish PaymentFailed| KAFKA
+    KAFKA -->|consume PaymentFailed| INVENTORY
+    INVENTORY -->|publish StockReleased| KAFKA
 
     INVENTORY -->|R2DBC| DB_INV["🐘 db_inventory"]
     ORDERS -->|R2DBC| DB_ORD["🐘 db_orders"]
@@ -85,22 +89,32 @@ sequenceDiagram
     participant P as ms-payment
 
     C->>O: POST /orders
-    Note over O,K: SAGA inicia
+    Note over O,K: SAGA inicia con status PENDING
 
     O->>K: OrderCreated
     K-->>I: OrderCreated
-    I->>K: StockReserved ✅
-    K-->>O: StockReserved
-    O->>P: HTTP (Circuit Breaker)
-
-    alt Pago exitoso
-        O->>O: ConfirmOrder ✅
-        O->>K: OrderConfirmed
-    else Pago fallido
-        O->>K: PaymentFailed
-        K-->>I: PaymentFailed → Liberar Stock
-        I->>K: StockReleased
-        K-->>O: CANCELLED
+    
+    alt Stock Insuficiente
+        I->>K: StockFailed ❌
+        K-->>O: StockFailed
+        O->>O: Status = CANCELLED
+    else Stock Disponible
+        I->>K: StockReserved ✅
+        K-->>O: StockReserved
+        O->>P: POST /api/payments/process (HTTP Circuit Breaker)
+        
+        alt Pago Exitoso
+            P-->>O: 200 OK
+            O->>O: Status = CONFIRMED
+            O->>K: OrderConfirmed
+        else Pago Fallido (o Timeout)
+            P-->>O: 500 Error / Timeout
+            O->>O: Status = CANCELLED
+            O->>K: PaymentFailed ❌
+            K-->>I: PaymentFailed (Compensación)
+            I->>I: Liberar Stock
+            I->>K: StockReleased
+        end
     end
 ```
 

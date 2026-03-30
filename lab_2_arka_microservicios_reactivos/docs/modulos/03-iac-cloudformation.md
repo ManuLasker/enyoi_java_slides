@@ -227,6 +227,7 @@ Resources:
             "orderCreated": "order-created",
             "stockReserved": "stock-reserved",
             "stockReleased": "stock-released",
+            "paymentProcessed": "payment-processed",
             "paymentFailed": "payment-failed",
             "orderConfirmed": "order-confirmed",
             "orderCancelled": "order-cancelled",
@@ -316,6 +317,18 @@ Outputs:
     Description: "ARN del secreto de configuración de Kafka"
     Value: !Ref rKafkaSecret
 
+  oOrdersSecretName:
+    Description: "Nombre del secreto de db-orders"
+    Value: !Sub "${pEnvironment}/arka/db-orders-creds"
+
+  oInventorySecretName:
+    Description: "Nombre del secreto de db-inventory"
+    Value: !Sub "${pEnvironment}/arka/db-inventory-creds"
+
+  oPaymentSecretName:
+    Description: "Nombre del secreto de db-payment"
+    Value: !Sub "${pEnvironment}/arka/db-payment-creds"
+
   oKafkaSecretName:
     Description: "Nombre del secreto de Kafka (para referencia en los microservicios)"
     Value: !Sub "${pEnvironment}/arka/kafka-config"
@@ -342,15 +355,18 @@ REGION="us-east-1"
 DB_USER="$POSTGRES_USER"
 DB_PASSWORD="$POSTGRES_PASSWORD"
 DB_ORDERS_NAME="$POSTGRES_ORDERS_DB"
-DB_ORDERS_PORT="$POSTGRES_ORDERS_PORT"
+DB_ORDERS_PORT="5432"
 DB_INVENTORY_NAME="$POSTGRES_INVENTORY_DB"
-DB_INVENTORY_PORT="$POSTGRES_INVENTORY_PORT"
+DB_INVENTORY_PORT="5432"
 DB_PAYMENT_NAME="$POSTGRES_PAYMENT_DB"
-DB_PAYMENT_PORT="$POSTGRES_PAYMENT_PORT"
+DB_PAYMENT_PORT="5432"
 KAFKA_BOOTSTRAP="$KAFKA_BOOTSTRAP_SERVERS"
 MS_ORDERS_URL="http://$MS_ORDERS_HOST:$MS_ORDERS_PORT"
 
 echo "Desplegando stack CloudFormation: $STACK_NAME"
+
+# aws s3 ls --endpoint-url http://localhost:4566
+
 
 # Desplegar (o actualizar) el stack con variables de entorno
 awslocal cloudformation deploy \
