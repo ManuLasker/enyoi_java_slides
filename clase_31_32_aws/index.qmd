@@ -1,0 +1,974 @@
+---
+title: "Patrones de Arquitectura en AWS para Ingenieria de Software"
+subtitle: "De catalogo de servicios a decisiones de arquitectura resiliente y escalable"
+format:
+  revealjs:
+    slide-level: 2
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "AWS Patterns - ENYOI"
+---
+
+# Agenda {.smaller}
+
+::: columns
+::: {.column width="48%"}
+**Parte 1 - Fundacion y Capa de Red**
+
+- Caso guia: plataforma de pedidos
+- VPC (subnets, route tables, IGW, NAT)
+- ALB y API Gateway
+- Bastion Host e IAM perimetral
+:::
+
+::: {.column width="52%"}
+**Parte 2 - Compute, Datos, Eventos e IaC**
+
+- EC2 + Auto Scaling
+- S3, EBS, EFS (decision por patron)
+- RDS Multi-AZ y DocumentDB
+- SNS + SQS (fan-out y desacoplamiento)
+- CloudFormation vs Terraform
+- Patrones: multi-tier, fan-out, DR conceptual
+:::
+:::
+
+# Objetivo de la sesion {.smaller}
+
+No vamos a memorizar servicios. Vamos a tomar decisiones de arquitectura:
+
+- Que problema resuelve cada servicio.
+- Por que elegirlo frente a alternativas.
+- Como se integra con el resto del ecosistema.
+- Como validar la decision con AWS Well-Architected.
+
+# Caso guia: e-commerce de pedidos {.smaller}
+
+Escenario real para conectar todas las capas:
+
+- API de pedidos recibe trafico variable (picos por promociones).
+- Backend procesa pagos y envia notificaciones.
+- Datos transaccionales en SQL y catalogo flexible en documentos.
+- Necesitamos seguridad por defecto, alta disponibilidad y costos controlados.
+
+## Mapa de capas de referencia {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart TB
+  U[Cliente Web/Mobile] --> Edge[ALB / API Gateway]
+  Edge --> App[EC2 Auto Scaling Group]
+  App --> SQL[(RDS Multi-AZ)]
+  App --> Doc[(DocumentDB)]
+  App --> Obj[S3]
+  App --> File[EFS o EBS]
+  App --> Topic[SNS Topic]
+  Topic --> QueueA[SQS Facturacion]
+  Topic --> QueueB[SQS Notificaciones]
+
+  IAM[IAM Roles y Policies] -.aplica a.-> Edge
+  IAM -.aplica a.-> App
+  IAM -.aplica a.-> SQL
+  IaC[CloudFormation o Terraform] -.provisiona.-> Edge
+  IaC -.provisiona.-> App
+  IaC -.provisiona.-> SQL
+```
+
+# Capa 1 - Networking y Seguridad de Red
+
+## Objetivo de la capa {.smaller .objective}
+
+- Definir limites de red y superficies de ataque.
+- Aislar componentes por responsabilidad.
+- Garantizar rutas correctas de entrada y salida.
+
+## VPC: la ciudad privada de tu sistema {.smaller}
+
+![](images/aws/official/vpc.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+Analogia de ingenieria:
+
+- **VPC**: la ciudad privada.
+- **Subnets**: barrios con reglas distintas.
+- **Route Tables**: mapas de trafico.
+- **Security Groups / NACLs**: porteria y reglamento de barrio.
+:::
+::: { .column width="50%" }
+Buenas practicas:
+
+- Separar subnets publicas, privadas de app y privadas de datos.
+- Distribuir en multiples AZ para tolerancia a fallos.
+- Diseñar CIDR con crecimiento futuro.
+:::
+:::
+
+## Topologia VPC recomendada (multi-tier) {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+  Internet((Internet)) --> IGW[Internet Gateway]
+
+  subgraph Public[Subnets Publicas]
+    ALB[Application Load Balancer]
+    NAT[NAT Gateway]
+    Bastion[Bastion Host]
+  end
+
+  subgraph PrivateApp[Subnets Privadas App]
+    EC2A[EC2 App AZ-a]
+    EC2B[EC2 App AZ-b]
+  end
+
+  subgraph PrivateData[Subnets Privadas Datos]
+    RDS[(RDS Multi-AZ)]
+    DocDB[(DocumentDB)]
+  end
+
+  IGW --> ALB
+  IGW --> Bastion
+  EC2A --> NAT
+  EC2B --> NAT
+  ALB --> EC2A
+  ALB --> EC2B
+  EC2A --> RDS
+  EC2B --> RDS
+  EC2A --> DocDB
+  EC2B --> DocDB
+```
+
+## Route Tables: el trafico no es magia {.smaller}
+
+::: .columns
+::: { .column width="50%" }
+**Reglas minimas por tipo de subnet**:
+
+- Publica: `0.0.0.0/0 -> IGW`
+- Privada App: `0.0.0.0/0 -> NAT Gateway`
+- Privada Datos: sin salida directa a Internet
+:::
+::: { .column width="50%" }
+
+**Error comun**:
+
+- "Mi instancia en subnet privada no instala paquetes".
+- Causa tipica: route table sin NAT.
+:::
+:::
+
+## Security Groups vs NACLs {.smaller}
+
+- Security Group: firewall stateful a nivel instancia/ENI.
+- NACL: firewall stateless a nivel subnet.
+- Recomendacion practitioner:
+    - Security Group para control fino diario.
+    - NACL para guardrails de red (bloqueos amplios).
+
+## Bastion Host: uso y alternativa moderna {.smaller}
+
+![](images/aws/official/bastion-host.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+**Cuando usar Bastion**:
+
+- Equipos que aun dependen de SSH/RDP tradicional.
+- Entornos transitorios de migracion.
+:::
+::: { .column width="50%" }
+
+**Alternativa recomendada**:
+
+- AWS Systems Manager Session Manager (sin exponer puerto 22).
+
+**Regla de oro**:
+
+- Acceso administrativo debe ser temporal, auditado y minimo.
+:::
+:::
+
+## ALB + API Gateway: no compiten, se complementan {.smaller}
+
+![](images/aws/official/load-balancer.svg){width=90, height=90}
+![](images/aws/official/api-gateway.svg){width=90, height=90}
+
+- **ALB**: balanceo L7 para trafico HTTP/HTTPS dentro de VPC.
+- **API Gateway**: puerta de entrada para APIs publicas, throttling y auth.
+
+**Patron comun**:
+
+- Cliente externo -> API Gateway -> ALB -> EC2/ECS/Lambda.
+
+## Flujo de trafico recomendado {.smaller .compact-mermaid}
+
+```{mermaid}
+sequenceDiagram
+  participant C as Cliente
+  participant APIGW as API Gateway
+  participant ALB as ALB
+  participant EC2 as EC2 ASG
+  participant DB as RDS
+
+  C->>APIGW: HTTPS request
+  APIGW->>APIGW: Auth + throttling
+  APIGW->>ALB: Forward request
+  ALB->>EC2: Route por path/host
+  EC2->>DB: SQL query
+  DB-->>EC2: Result
+  EC2-->>ALB: Response
+  ALB-->>APIGW: Response
+  APIGW-->>C: 200 OK
+```
+
+## Terraform snippet: VPC base (didactico) {.smaller}
+
+```terraform
+resource "aws_vpc" "main" {
+  cidr_block           = "10.20.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags = { Name = "prod-vpc" }
+}
+
+resource "aws_subnet" "public_a" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.20.1.0/24"
+  availability_zone       = "us-east-1a"
+  map_public_ip_on_launch = true
+}
+
+resource "aws_subnet" "private_app_a" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.20.11.0/24"
+  availability_zone = "us-east-1a"
+}
+
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.main.id
+}
+
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public_a.id
+}
+```
+
+## Decision checkpoints - Networking {.smaller}
+
+- Puedes explicar por que una subnet es publica/privada.
+- Tienes route tables explicitas para cada subnet.
+- Tienes entrada controlada (ALB/API Gateway) y salida controlada (NAT).
+- El acceso admin no depende de "abrir SSH al mundo".
+
+# Capa 2 - Compute y Escalabilidad
+
+## EC2: motor de ejecucion bajo control {.smaller}
+
+![](images/aws/official/ec2.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+- EC2 te da control de runtime, SO y librerias.
+- Ideal cuando necesitas afinacion fina o cargas legacy.
+- Contras: mayor carga operativa si no automatizas.
+:::
+::: { .column width="50%" }
+**Modelo de costo (decision rapida)**:
+
+- **On-Demand**: incertidumbre alta.
+- **Savings/Reserved**: carga estable.
+- **Spot**: batch tolerante a interrupciones.
+:::
+:::
+
+## Auto Scaling: elasticidad con criterio {.smaller}
+
+**No es solo "agregar instancias"**.
+
+- Define metrica principal (CPU, request count, queue depth).
+- Define umbral y ventana (evitar flapping).
+- Define minimo, maximo y capacidad deseada.
+
+**Ejemplo**:
+
+- Min 2, Desired 4, Max 12.
+- Target tracking: CPU promedio 60%.
+
+## Auto Scaling en accion {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+  Traffic[Pico de trafico] --> CW[CloudWatch Alarm]
+  CW --> ASG[Auto Scaling Group]
+  ASG --> Add[+2 EC2]
+  Add --> ALB[ALB reparte trafico]
+  ALB --> Stable[Latencia estable]
+```
+
+## ALB Best Practices {.smaller}
+
+- Terminar TLS en ALB con AWS Certificate Manager.
+- Health checks por endpoint critico (`/healthz`).
+- Target groups por tipo de workload.
+- Access logs habilitados para auditoria.
+
+## API Gateway Best Practices {.smaller}
+
+- Throttling y quotas por cliente/API key.
+- Authorizers (IAM/JWT/Lambda) segun contexto.
+- Versionado de APIs para evitar breaking changes.
+- Integrar observabilidad con CloudWatch.
+
+## Snippet Terraform: ASG + ALB (abreviado) {.smaller}
+
+```terraform
+resource "aws_launch_template" "api" {
+  name_prefix   = "api-"
+  image_id      = "ami-xxxxxxxx"
+  instance_type = "t3.medium"
+}
+
+resource "aws_autoscaling_group" "api" {
+  min_size            = 2
+  max_size            = 12
+  desired_capacity    = 4
+  vpc_zone_identifier = [aws_subnet.private_app_a.id, aws_subnet.private_app_b.id]
+  target_group_arns   = [aws_lb_target_group.api.arn]
+  health_check_type   = "ELB"
+}
+
+resource "aws_autoscaling_policy" "cpu60" {
+  name                   = "cpu-target-60"
+  policy_type            = "TargetTrackingScaling"
+  autoscaling_group_name = aws_autoscaling_group.api.name
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = 60
+  }
+}
+```
+
+# Capa 3 - Storage y Estado
+
+## Analogia clave: EBS vs EFS vs S3 {.smaller}
+
+- **EBS**: disco duro local de una VM (bloque, baja latencia).
+- **EFS**: carpeta de red compartida (NFS, multi-instancia).
+- **S3**: bucket de objetos via API (durabilidad extrema, no POSIX).
+
+## EBS: bloque para cargas stateful cercanas a EC2 {.smaller}
+
+![](images/aws/official/ebs.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+**Cuando elegir EBS:**
+
+- Base de datos instalada en EC2.
+- Baja latencia y control de IOPS.
+- Persistencia por volumen y snapshots.
+:::
+::: { .column width="50%" }
+
+**Cuidado:**
+
+- No es almacenamiento compartido nativo entre multiples EC2.
+:::
+:::
+
+## EFS: sistema de archivos compartido {.smaller}
+
+![](images/aws/official/efs.svg){width=110, height=110}
+
+::: .columns
+
+::: { .column width="50%" }
+**Cuando elegir EFS:**
+
+- Varias instancias necesitan leer/escribir el mismo arbol de archivos.
+- Contenido compartido, home dirs, assets comunes.
+:::
+
+::: { .column width="50%" }
+
+**Trade-off:**
+
+- Mas simple de operar para comparticion, usualmente mayor costo que EBS.
+:::
+
+:::
+
+## S3: objetos y ciclo de vida {.smaller}
+
+![](images/aws/official/s3.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+**Cuando elegir S3:**
+
+- Backups, contenido estatico, data lake, archivos historicos.
+- Integraciones event-driven y alta durabilidad.
+:::
+::: { .column width="50%" }
+
+**Buenas practicas:**
+
+- Versioning, encryption, block public access, lifecycle.
+:::
+:::
+
+## Lifecycle de S3: costo por temperatura de datos {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+  D0[Dia 0: Standard] --> D30[Dia 30: Intelligent-Tiering]
+  D30 --> D90[Dia 90: Glacier Instant Retrieval]
+  D90 --> D180[Dia 180: Glacier Flexible Retrieval]
+  D180 --> D365[Dia 365: Expirar objeto]
+```
+
+## Snippet Terraform: lifecycle policy S3 {.smaller}
+
+```terraform
+resource "aws_s3_bucket" "logs" {
+  bucket = "acme-prod-logs"
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "logs_lifecycle" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    id     = "logs-tiering"
+    status = "Enabled"
+
+    transition {
+      days          = 30
+      storage_class = "INTELLIGENT_TIERING"
+    }
+
+    transition {
+      days          = 90
+      storage_class = "GLACIER_IR"
+    }
+
+    expiration {
+      days = 365
+    }
+  }
+}
+```
+
+## Matriz de decision rapida {.smaller}
+
+| Criterio | EBS | EFS | S3 |
+|---|---|---|---|
+| Tipo | Bloque | File system | Objetos |
+| Compartido multi-EC2 | No (nativo) | Si | Via API |
+| Latencia | Muy baja | Baja-media | Mayor |
+| Caso tipico | DB en EC2 | Shared files | Backups/static |
+| Patron principal | Stateful local | Stateful compartido | Stateless assets |
+
+# Capa 4 - Datos y Disponibilidad
+
+## RDS: SQL administrado para transacciones {.smaller}
+
+![](images/aws/official/rds.svg){width=110, height=110}
+
+- Reduce carga operativa de backups, parches y monitoreo.
+- **Engines comunes**: PostgreSQL, MySQL, MariaDB.
+- Para sistemas transaccionales con integridad relacional.
+
+## Multi-AZ: alta disponibilidad en serio {.smaller}
+
+- Replica sincronica standby en otra AZ.
+- Failover automatico ante fallo de primario.
+- Objetivo: minimizar downtime sin rediseñar aplicacion.
+
+**Recordatorio:**
+
+- Multi-AZ mejora disponibilidad, no escala lectura.
+- Para lecturas, usar Read Replicas.
+
+## Failover conceptual RDS Multi-AZ {.smaller .compact-mermaid}
+
+```{mermaid}
+sequenceDiagram
+  participant App
+  participant P as RDS Primario (AZ-a)
+  participant S as RDS Standby (AZ-b)
+
+  App->>P: Query
+  P-->>App: OK
+  P->>S: Replicacion sincronica
+
+  Note over P,S: Falla en AZ-a
+  P--xApp: Timeout temporal
+  S->>S: Promocion automatica a primario
+  App->>S: Reintento
+  S-->>App: OK
+```
+
+## DocumentDB: documentos para modelos flexibles {.smaller}
+
+![](images/aws/official/documentdb.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+**Cuando aporta valor:**
+
+- Esquemas variables (catalogos con atributos dinamicos).
+- Evolucion rapida de modelo sin migraciones pesadas.
+- Consultas por documentos y estructuras anidadas.
+:::
+::: { .column width="50%" }
+
+**Cuando no es ideal:**
+
+- Relaciones complejas con joins fuertes y transacciones SQL intensivas.
+:::
+:::
+
+## RDS vs DocumentDB: decision arquitectonica {.smaller}
+
+```{mermaid}
+flowchart LR
+  Need[Que tipo de datos predomina?] --> Rel[Relacional, ACID, joins]
+  Need --> Doc[Semiestructurado, flexible]
+  Rel --> RDS[RDS]
+  Doc --> DDB[DocumentDB]
+```
+
+# Capa 5 - Mensajeria y Desacoplamiento
+
+## SNS + SQS: patron fan-out {.smaller}
+
+![](images/aws/official/sns.svg){width=95, height=95}
+![](images/aws/official/sqs.svg){width=95, height=95}
+
+**Por que usarlo:**
+
+- Desacoplas productor y consumidores.
+- Aislas fallos de un consumidor sin tumbar todo.
+- Escalas cada consumidor a su ritmo.
+
+## Fan-out operativo con filtros {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+  Order[Evento OrderCreated] --> SNS[SNS Topic orders]
+  SNS -->|tipo=factura| Q1[SQS Billing]
+  SNS -->|tipo=email| Q2[SQS Notifications]
+  SNS -->|all events| Q3[SQS Audit]
+  Q1 --> C1[Worker Billing]
+  Q2 --> C2[Worker Email]
+  Q3 --> C3[Worker Audit]
+```
+
+## SQS Best Practices {.smaller}
+
+- Visibility timeout > tiempo maximo de procesamiento.
+- Dead Letter Queue para mensajes fallidos repetidos.
+- Idempotencia en consumidor para evitar dobles efectos.
+- Long polling para reducir costo y respuestas vacias.
+
+## Deep dive: SQS Long Polling {.smaller}
+
+**Definicion practica:**
+
+- Long polling hace que `ReceiveMessage` espere hasta `20s` por mensajes.
+- Evita responder vacio inmediatamente cuando la cola esta momentaneamente sin carga.
+- Reduce llamadas API inutiles y baja costo de polling.
+
+**Parametro clave:**
+
+- `WaitTimeSeconds` por request o `ReceiveMessageWaitTimeSeconds` por cola.
+
+## Short vs Long Polling (decision tecnica) {.smaller}
+
+| Tema | Short Polling | Long Polling |
+|---|---|---|
+| Espera por request | Casi inmediata | Hasta 20s |
+| Empty responses | Frecuentes | Mucho menos frecuentes |
+| Costo API | Mayor | Menor |
+| Latencia para mensaje recien llegado | Variable, depende de frecuencia de loop | Baja con espera activa en server |
+| Uso recomendado | Casos puntuales de baja escala | Produccion por defecto |
+
+## Flujo de long polling en runtime {.smaller .compact-mermaid}
+
+```{mermaid}
+sequenceDiagram
+  participant W as Worker
+  participant Q as SQS Queue
+
+  W->>Q: ReceiveMessage(WaitTimeSeconds=20)
+  alt Hay mensaje disponible
+    Q-->>W: Message(s)
+    W->>Q: DeleteMessage
+  else No hay mensaje aun
+    Q-->>W: Responde al expirar wait
+  end
+  W->>Q: Nuevo ReceiveMessage
+```
+
+## Configuracion recomendada {.smaller}
+
+- Cola: `ReceiveMessageWaitTimeSeconds = 20` como baseline.
+- Consumidor: `WaitTimeSeconds` explicito para evitar defaults ambiguos.
+- HTTP timeout cliente > `WaitTimeSeconds` + margen de red.
+- Ajustar `MaxNumberOfMessages` (hasta 10) para mejorar throughput.
+
+**Regla de oro:**
+
+- Si no usas long polling en produccion, casi seguro estas pagando de mas.
+
+## Snippet Terraform: habilitar long polling {.smaller}
+
+```terraform
+resource "aws_sqs_queue" "orders" {
+  name                              = "orders-events"
+  receive_wait_time_seconds         = 20
+  visibility_timeout_seconds        = 60
+  message_retention_seconds         = 345600
+  max_message_size                  = 262144
+}
+```
+
+## Snippet consumidor (Java Spring Boot) {.smaller}
+
+```java
+import io.awspring.cloud.sqs.annotation.SqsListener;
+import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+import org.springframework.stereotype.Component;
+
+@Component
+public class OrdersConsumer {
+
+  // Config recomendado en application.yml:
+  // spring.cloud.aws.sqs.listener.max-messages-per-poll=10
+  // spring.cloud.aws.sqs.listener.poll-timeout=20s
+  // spring.cloud.aws.sqs.listener.acknowledgement-mode=MANUAL
+  @SqsListener(value = "orders-events")
+  public void onMessage(String payload, Acknowledgement ack) {
+    if (alreadyProcessed(payload)) {
+      ack.acknowledge();
+      return;
+    }
+
+    processMessage(payload);
+    ack.acknowledge();
+  }
+
+  private boolean alreadyProcessed(String payload) {
+    return false;
+  }
+
+  private void processMessage(String payload) {
+    // Logica de negocio
+  }
+}
+```
+
+## Errores comunes y tuning {.smaller}
+
+- `WaitTimeSeconds=0`: vuelve a short polling y dispara empty receives.
+- Visibility timeout corto: duplica procesamiento en cargas lentas.
+- No usar DLQ: reintentos infinitos en mensajes venenosos.
+- Un solo worker para alto volumen: cuello de botella.
+
+**Checklist rapido:**
+
+- Long polling activo.
+- Visibility timeout alineado al p95/p99 de procesamiento.
+- DLQ con `maxReceiveCount` definido.
+- Metricas CloudWatch: `NumberOfMessagesReceived`, `ApproximateAgeOfOldestMessage`.
+
+## Snippet Terraform: SNS + SQS subscription {.smaller}
+
+```terraform
+resource "aws_sns_topic" "orders" {
+  name = "orders-events"
+}
+
+resource "aws_sqs_queue" "billing" {
+  name = "orders-billing"
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.billing_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+resource "aws_sqs_queue" "billing_dlq" {
+  name = "orders-billing-dlq"
+}
+
+resource "aws_sns_topic_subscription" "billing_sub" {
+  topic_arn = aws_sns_topic.orders.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.billing.arn
+
+  filter_policy = jsonencode({
+    eventType = ["INVOICE_REQUIRED"]
+  })
+}
+```
+
+# Capa 6 - Seguridad Transversal (IAM)
+
+## IAM: permisos como codigo {.smaller}
+
+![](images/aws/official/iam-roles-policies.svg){width=110, height=110}
+
+::: .columns
+::: { .column width="50%" }
+**Principio central:**
+
+- Least privilege: permitir solo acciones necesarias, sobre recursos necesarios, por tiempo necesario.
+:::
+::: { .column width="50%" }
+
+**Modelo mental:**
+
+- Role = identidad asumible.
+- Policy = permisos.
+- Trust policy = quien puede asumir el rol.
+:::
+:::
+
+## Policy JSON de minimo privilegio (ejemplo real) {.smaller}
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOnlyInvoicesPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::acme-invoices-prod/2026/*"
+    },
+    {
+      "Sid": "ListOnlyInvoicesFolder",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::acme-invoices-prod",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "2026/*"
+        }
+      }
+    }
+  ]
+}
+```
+
+## Trust policy (AssumeRole) {.smaller}
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+## Checklist IAM practitioner {.smaller}
+
+- Evitar `Resource: *` salvo justificacion.
+- Preferir condiciones (`aws:SourceIp`, tags, prefijos).
+- Rotar y evitar credenciales largas en apps.
+- Auditar con CloudTrail y Access Analyzer.
+
+# Capa 7 - Infrastructure as Code (IaC)
+
+## CloudFormation vs Terraform: comparativa tecnica {.smaller}
+
+| Dimension | CloudFormation | Terraform |
+|---|---|---|
+| Alcance | AWS nativo | Multi-cloud |
+| Estado | Gestionado por stack | State explicito (backend remoto recomendado) |
+| Drift | Drift detection nativo | Drift via plan/refresh + tooling |
+| Modulos | Nested stacks / StackSets | Modulos reutilizables maduros |
+| Caso ideal | Organizacion 100% AWS | Plataforma multi-cloud o estandar HCL |
+
+## Casos de uso recomendados {.smaller}
+
+- CloudFormation cuando:
+    - Quieres integracion AWS nativa y gobierno centralizado por stack.
+
+- Terraform cuando:
+    - Necesitas estandarizar IaC entre nubes y ecosistemas diversos.
+
+## Snippet CloudFormation (extracto VPC) {.smaller}
+
+```yaml
+Resources:
+  MainVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.30.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: 10.30.1.0/24
+      MapPublicIpOnLaunch: true
+```
+
+## Snippet Terraform equivalente (extracto VPC) {.smaller}
+
+```terraform
+resource "aws_vpc" "main" {
+  cidr_block           = "10.30.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+}
+
+resource "aws_subnet" "public_a" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.30.1.0/24"
+  map_public_ip_on_launch = true
+}
+```
+
+## IaC guardrails que evitan incidentes {.smaller}
+
+- Pull requests + `terraform plan`/Change Sets en CI.
+- Estado remoto con locking.
+- Politicas de borrado y backups antes de cambios destructivos.
+- Etiquetado obligatorio para costo/propiedad.
+
+# Patrones Arquitectonicos Integrados
+
+## Patron 1: Multi-tier en AWS {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart TB
+  User((Usuario)) --> Edge[API Gateway]
+  Edge --> ALB[ALB]
+  ALB --> Web[EC2 ASG - Web/API]
+  Web --> SQL[(RDS Multi-AZ)]
+  Web --> Doc[(DocumentDB)]
+  Web --> Obj[S3]
+```
+
+## Patron 2: Fan-out para desacoplar dominio {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+  Service[Order Service] --> Topic[SNS Topic]
+  Topic --> PayQ[SQS Payments]
+  Topic --> MailQ[SQS Email]
+  Topic --> BIQ[SQS Analytics]
+```
+
+## Patron 3: Disaster Recovery (conceptual) {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart TB
+  subgraph Primary[Region primaria]
+    App1[EC2 ASG]
+    DB1[(RDS)]
+  end
+
+  subgraph DR[Region secundaria]
+    App2[Capacidad minima o standby]
+    DB2[(Replica/backup restaurable)]
+  end
+
+  App1 -.replicacion/artefactos.-> App2
+  DB1 -.backup/replicacion.-> DB2
+```
+
+## DR: como elegir estrategia conceptual {.smaller}
+
+- **Backup & Restore:** menor costo, mayor RTO.
+- **Pilot Light:** componentes minimos encendidos.
+- **Warm Standby:** capacidad reducida activa.
+- **Active/Active:** mayor costo, menor RTO.
+
+**Regla practica:**
+
+- Si el negocio no tolera caida larga, no puedes elegir estrategia barata por defecto.
+
+# Well-Architected aplicado a esta arquitectura
+
+## Checklist por pilar {.smaller}
+
+- **Operational Excellence**: IaC, despliegues repetibles, runbooks.
+- **Security**: IAM least privilege, cifrado, auditoria.
+- **Reliability**: Multi-AZ, health checks, colas y reintentos.
+- **Performance Efficiency**: Auto Scaling, tipo de storage correcto.
+- **Cost Optimization**: lifecycle S3, right sizing, clases de compra EC2.
+
+## Matriz de decision final (resumen) {.smaller}
+
+| Necesidad | Servicio/Patron recomendado | Motivo |
+|---|---|---|
+| Entrada HTTP resiliente | ALB + API Gateway | Seguridad, routing, control de consumo |
+| Compute elastico | EC2 + ASG | Escala horizontal con control operativo |
+| Archivos compartidos | EFS | Multi-EC2 con semantica de filesystem |
+| Datos transaccionales | RDS Multi-AZ | HA administrada para SQL |
+| Eventos desacoplados | SNS + SQS | Aislar consumidores y absorber picos |
+| Gobierno de infraestructura | IaC (CF o TF) | Cambios auditables y repetibles |
+
+# Cierre
+
+## Mensaje final {.smaller}
+
+Arquitectura cloud no es una lista de servicios.
+
+Es una cadena de decisiones tecnicas conectadas:
+
+- Red define el perimetro de confianza.
+- Compute ejecuta logica con elasticidad.
+- Datos y mensajeria sostienen continuidad del negocio.
+- Seguridad e IaC hacen la arquitectura gobernable.
+
+## Recursos oficiales {.smaller}
+
+- [AWS VPC - Documentacion Oficial](https://docs.aws.amazon.com/vpc/)
+- [Amazon EC2 - Documentacion Oficial](https://docs.aws.amazon.com/ec2/)
+- [Elastic Load Balancing - Documentacion Oficial](https://docs.aws.amazon.com/elasticloadbalancing/)
+- [Amazon API Gateway - Documentacion Oficial](https://docs.aws.amazon.com/apigateway/)
+- [Amazon S3 - Documentacion Oficial](https://docs.aws.amazon.com/s3/)
+- [Amazon EFS - Documentacion Oficial](https://docs.aws.amazon.com/efs/)
+- [Amazon EBS - Documentacion Oficial](https://docs.aws.amazon.com/ebs/)
+- [Amazon RDS - Documentacion Oficial](https://docs.aws.amazon.com/rds/)
+- [Amazon DocumentDB - Documentacion Oficial](https://docs.aws.amazon.com/documentdb/)
+- [Amazon SNS - Documentacion Oficial](https://docs.aws.amazon.com/sns/)
+- [Amazon SQS - Documentacion Oficial](https://docs.aws.amazon.com/sqs/)
+- [AWS IAM - Documentacion Oficial](https://docs.aws.amazon.com/iam/)
+- [AWS CloudFormation - Documentacion Oficial](https://docs.aws.amazon.com/cloudformation/)
+- [Terraform - Documentacion Oficial](https://developer.hashicorp.com/terraform/docs)

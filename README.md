@@ -17,3 +17,4 @@ base_url: https://manulasker.github.io/enyoi_java_slides/
 12. https://manulasker.github.io/enyoi_java_slides/clase_27_28_spring_boot_parte_2/
 13. https://manulasker.github.io/enyoi_java_slides/clase_29_deep_dive_arka_architecture/
 14. https://manulasker.github.io/enyoi_java_slides/clase_29_30_spring_extras_cloud/
+15. https://manulasker.github.io/enyoi_java_slides/clase_31_32_aws/
