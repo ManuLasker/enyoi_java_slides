@@ -70,6 +70,7 @@ jobs:
             clase_26_repaso_quiz_4
             clase_27_28_spring_boot_parte_1
             clase_27_28_spring_boot_parte_2
+            clase_29_30_spring_extras_cloud
         run: |
           for dir in $QUARTO_DIRS; do
             quarto render $dir/index.qmd
@@ -87,6 +88,7 @@ jobs:
             clase_26_repaso_quiz_4
             clase_27_28_spring_boot_parte_1
             clase_27_28_spring_boot_parte_2
+            clase_29_30_spring_extras_cloud
         run: |
           set -e
           mkdir -p _site

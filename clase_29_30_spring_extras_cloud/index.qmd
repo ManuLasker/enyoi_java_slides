@@ -1,0 +1,1781 @@
+---
+title: "Spring Extras & Spring Cloud"
+subtitle: "Scheduling, Caching, AOP, Events, Config Server, Gateway, Resilience4j, Stream & Observabilidad"
+format:
+  revealjs:
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "Spring Extras & Spring Cloud - ENYOI"
+---
+
+
+# Agenda {.smaller}
+
+::: columns
+::: {.column width="45%"}
+**Bloque 1 — Spring Extras**
+
+- Scheduling (Tareas programadas)
+- Caching (Caché de datos)
+- Eventos de Aplicación
+- AOP (Orientada a Aspectos)
+:::
+
+::: {.column width="55%"}
+**Bloque 2 — Spring Cloud**
+
+- Discovery Service
+- Config Server
+- API Gateway
+- Circuit Breaker / Resilience4j
+- Cloud Functions
+- Cloud Stream (Kafka/RabbitMQ)
+- OpenFeign
+- Spring Security + JWT
+- Spring AI
+- Observabilidad Distribuida
+:::
+:::
+
+::: {.notes}
+- Explicar que "Spring Extras" son funcionalidades avanzadas de Spring Boot que muchos proyectos usan pero pocos cubren bien.
+- Spring Cloud es el toolkit para microservicios distribuidos.
+- Conectar con lo visto en Parte 1 y 2.
+:::
+
+
+# Objetivos de la clase {.smaller}
+
+- Entender **para que sirve** cada herramienta del ecosistema Spring Cloud.
+- Ver **ejemplos concretos** en Java y flujos con Mermaid.
+- Aprender **cuando usar** cada componente sin sobrecargar la arquitectura.
+- Cerrar con un mapa mental que conecte Spring Extras + Spring Cloud.
+
+
+
+# Bloque 1: Spring Extras
+
+Funcionalidades avanzadas de Spring Boot para aplicaciones profesionales.
+
+
+
+# Scheduling (Tareas Programadas)
+
+Ejecutar tareas de forma automática y periódica.
+
+::: {.notes}
+- Caso práctico: limpieza de BD, envío de emails, sincronización de inventario.
+- Diferenciar del cron del SO: aquí vive en la app, con acceso a beans.
+:::
+
+---
+
+## Objetivo: Scheduling {.smaller .objective}
+
+- Automatizar tareas repetitivas dentro de la app.
+- Controlar frecuencia y concurrencia sin scripts externos.
+- Preparar el terreno para tareas distribuidas (Spring Cloud Task).
+
+---
+
+## Habilitando Scheduling {.smaller}
+
+```java
+@Configuration
+@EnableScheduling // ← Activa el sistema de tareas programadas
+public class SchedulingConfig {
+    // Opcionalmente, configura un pool de threads dedicado
+    @Bean
+    public TaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(5);
+        scheduler.setThreadNamePrefix("scheduled-");
+        return scheduler;
+    }
+}
+```
+
+::: {.callout-tip}
+Sin `@EnableScheduling`, las anotaciones `@Scheduled` se ignoran silenciosamente.
+:::
+
+---
+
+## @Scheduled: Estrategias {.smaller}
+
+```java
+@Service
+public class InventorySyncService {
+
+    // Cada 30 segundos (desde que termina la anterior)
+    @Scheduled(fixedDelay = 30_000)
+    public void syncInventory() {
+        log.info("Sincronizando inventario...");
+    }
+
+    // Cada 60 segundos (sin importar duración anterior)
+    @Scheduled(fixedRate = 60_000)
+    public void generateReport() {
+        log.info("Generando reporte...");
+    }
+
+    // Cron: lunes a viernes a las 6:00 AM
+    @Scheduled(cron = "0 0 6 * * MON-FRI")
+    public void morningCleanup() {
+        log.info("Limpieza matutina de datos...");
+    }
+}
+```
+
+---
+
+## Comparación de Estrategias {.smaller}
+
+| Estrategia | Ejemplo | Comportamiento |
+|-----------|---------|----------------|
+| `fixedDelay` | `30000` | Espera 30s **después** de terminar la tarea anterior |
+| `fixedRate` | `60000` | Ejecuta cada 60s **sin importar** si la anterior terminó |
+| `cron` | `"0 0 6 * * MON-FRI"` | Expresión cron (seg min hora día mes díaSemana) |
+| `initialDelay` | `5000` | Espera 5s antes de la primera ejecución |
+
+::: {.callout-warning}
+**Peligro con `fixedRate`**: si la tarea dura más que el intervalo, puede haber solapamiento. Usa `fixedDelay` si la tarea es costosa.
+:::
+
+---
+
+## Cron Externalizado {.smaller}
+
+Buena práctica: sacar el cron a configuración externa.
+
+```java
+@Scheduled(cron = "${app.inventory.sync-cron}")
+public void syncInventory() {
+    // ...
+}
+```
+
+```yaml
+# application.yml
+app:
+  inventory:
+    sync-cron: "0 */15 * * * *"  # Cada 15 minutos
+```
+
+Esto permite cambiar la frecuencia **sin recompilar** la aplicación.
+
+::: {.notes}
+- Vincular con el factor III de 12-Factor App: "Config".
+- En producción, el cron puede venir de ConfigMap de K8s o Config Server.
+:::
+
+
+
+# Caching (Caché de Datos)
+
+Reducir latencia y carga almacenando resultados frecuentes.
+
+::: {.notes}
+- El caché es una de las técnicas más efectivas para mejorar rendimiento.
+- Spring Boot abstrae el proveedor: puedes empezar con caché en memoria y luego migrar a Redis sin cambiar código.
+:::
+
+---
+
+## Objetivo: Caching {.smaller .objective}
+
+- Disminuir latencia y carga de base de datos.
+- Elegir proveedor sin cambiar código de negocio.
+- Controlar consistencia con políticas de cacheo.
+
+---
+
+## Habilitando Caché {.smaller}
+
+```java
+@Configuration
+@EnableCaching // ← Activa anotaciones de caché
+public class CacheConfig {
+}
+```
+
+Proveedores soportados:
+
+| Proveedor | Tipo | Uso típico |
+|-----------|------|-----------|
+| **ConcurrentMapCache** | En memoria (default) | Desarrollo, apps pequeñas |
+| **Caffeine** | En memoria (alto rendimiento) | Apps medianas |
+| **Redis** | Distribuido | Microservicios, producción |
+| **Hazelcast** | Distribuido | Clusters, alta disponibilidad |
+
+---
+
+## Anotaciones de Caché {.smaller}
+
+```java
+@Service
+public class ProductService {
+
+    @Cacheable(value = "products", key = "#id") // ← Guarda resultado en caché
+    public Product findById(Long id) {
+        log.info("Consultando BD para producto id={}", id);
+        return productRepository.findById(id)
+            .orElseThrow(() -> new ProductNotFoundException(id));
+    }
+
+    @CachePut(value = "products", key = "#product.id") // ← Actualiza caché
+    public Product update(Product product) {
+        return productRepository.save(product);
+    }
+
+    @CacheEvict(value = "products", key = "#id") // ← Elimina del caché
+    public void delete(Long id) {
+        productRepository.deleteById(id);
+    }
+
+    @CacheEvict(value = "products", allEntries = true) // ← Limpia TODO
+    public void clearCache() {
+        log.info("Caché de productos limpiado");
+    }
+}
+```
+
+---
+
+## Flujo de @Cacheable {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+    REQ[Petición findById 42] --> CHECK{¿Está en caché?}
+    CHECK -->|Sí| HIT[Cache HIT - Retorna rápido]
+    CHECK -->|No| MISS[Cache MISS]
+    MISS --> DB[(Base de Datos)]
+    DB --> STORE[Guarda en caché]
+    STORE --> RES[Retorna resultado]
+
+    style HIT fill:#50fa7b,color:#000
+    style MISS fill:#ff5555,color:#fff
+    style STORE fill:#8be9fd,color:#000
+```
+
+Primera llamada: va a la BD. Siguientes llamadas con mismo ID: responde del caché.
+
+---
+
+## Caché con Redis {.smaller}
+
+```yaml
+# application.yml
+spring:
+  cache:
+    type: redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: secret
+```
+
+```java
+@Cacheable(value = "products", key = "#id",
+    unless = "#result == null",                  // No cachear nulls
+    condition = "#id > 0")                       // Solo IDs válidos
+public Product findById(Long id) {
+    return productRepository.findById(id).orElse(null);
+}
+```
+
+::: {.callout-tip}
+`unless` evalúa después de la ejecución (tiene acceso a `#result`). `condition` evalúa antes.
+:::
+
+
+
+# Eventos de Aplicación
+
+Comunicación desacoplada entre componentes dentro de la misma app.
+
+::: {.notes}
+- Los eventos son la base de arquitecturas orientadas a eventos dentro del monolito.
+- Patrón publish/subscribe local — antecesor de los eventos distribuidos con Kafka.
+:::
+
+---
+
+## Objetivo: Eventos de Aplicación {.smaller .objective}
+
+- Desacoplar procesos dentro del mismo servicio.
+- Reaccionar a cambios sin dependencias directas.
+- Preparar el paso a mensajería distribuida.
+
+---
+
+## Publicar y Escuchar Eventos {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Definir y Publicar**
+
+```java
+// 1. Definir el evento
+public record OrderCreatedEvent(
+    Long orderId, String sku,
+    int quantity) {}
+
+// 2. Publicar
+@Service
+public class OrderService {
+    private final ApplicationEventPublisher
+        eventPublisher;
+
+    public Order createOrder(
+            CreateOrderRequest req) {
+        Order order = orderRepository
+            .save(toEntity(req));
+        eventPublisher.publishEvent(
+            new OrderCreatedEvent(
+                order.getId(),
+                order.getSku(),
+                order.getQty()));
+        return order;
+    }
+}
+```
+:::
+
+::: {.column width="50%"}
+**Escuchar**
+
+```java
+// 3. Escuchar el evento
+@Component
+public class InventoryEventListener {
+
+    @EventListener
+    public void onOrderCreated(
+            OrderCreatedEvent event) {
+        log.info(
+            "Reservando stock: {} x{}",
+            event.sku(),
+            event.quantity());
+        inventoryService.reserveStock(
+            event.sku(),
+            event.quantity());
+    }
+}
+```
+:::
+:::
+
+---
+
+## Eventos Async y Transaccionales {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Eventos Asíncronos**
+
+```java
+@Configuration
+@EnableAsync // ← Habilita @Async
+public class AsyncConfig {}
+
+@Component
+public class NotificationListener {
+
+    @Async // ← Ejecuta en otro thread
+    @EventListener
+    public void onOrderCreated(
+            OrderCreatedEvent event) {
+        emailService.sendConfirmation(
+            event.orderId());
+    }
+}
+```
+:::
+
+::: {.column width="50%"}
+**Eventos Transaccionales**
+
+```java
+@Component
+public class AuditListener {
+
+    // Solo se ejecuta SI el commit
+    // de la transacción fue exitoso
+    @TransactionalEventListener(
+        phase = TransactionPhase.AFTER_COMMIT)
+    public void onOrderCommitted(
+            OrderCreatedEvent event) {
+        auditService.log(
+            "Order created: "
+            + event.orderId());
+    }
+}
+```
+:::
+:::
+
+::: {.callout-warning}
+`@TransactionalEventListener` evita procesar eventos de transacciones que hicieron rollback.
+:::
+
+
+
+# AOP (Aspect-Oriented Programming)
+
+Separar preocupaciones transversales del código de negocio.
+
+::: {.notes}
+- AOP permite modularizar logging, seguridad, métricas sin contaminar la lógica de negocio.
+- Spring Security y @Transactional son ejemplos reales de AOP en acción.
+:::
+
+---
+
+## Objetivo: AOP {.smaller .objective}
+
+- Centralizar preocupaciones transversales.
+- Reducir duplicación en servicios.
+- Aplicar políticas como seguridad y métricas sin tocar el core.
+
+---
+
+## Conceptos de AOP {.smaller}
+
+::: columns
+::: {.column width="40%"}
+**Sin AOP** — Cada servicio repite las mismas preocupaciones:
+
+| Servicio | Contiene |
+|----------|----------|
+| Service A | logging, security, metrics |
+| Service B | logging, security, metrics |
+| Service C | logging, security, metrics |
+
+❌ Código duplicado en cada servicio
+:::
+
+::: {.column width="60%"}
+**Con AOP** — Un Aspect centraliza las preocupaciones:
+
+```{mermaid}
+graph LR
+    A1[Service A] --> ASP[Aspect]
+    A2[Service B] --> ASP
+    A3[Service C] --> ASP
+    ASP --> LOG[Logging]
+    ASP --> SEC[Security]
+    ASP --> MET[Metrics]
+
+    style ASP fill:#bd93f9,color:#fff
+    style LOG fill:#50fa7b,color:#000
+    style SEC fill:#ff79c6,color:#000
+    style MET fill:#8be9fd,color:#000
+```
+
+✅ Lógica transversal en **un solo lugar**
+:::
+:::
+
+---
+
+## Tipos de Advice {.smaller}
+
+| Tipo | Cuándo se ejecuta | Uso típico |
+|------|-------------------|-----------|
+| `@Before` | **Antes** del método | Validación, logging de entrada |
+| `@After` | **Después** (siempre) | Limpieza de recursos |
+| `@AfterReturning` | Solo si **no** hubo excepción | Auditoría de resultados |
+| `@AfterThrowing` | Solo si **hubo** excepción | Logging de errores |
+| `@Around` | **Envuelve** el método completo | Métricas de tiempo, retry, cache |
+
+---
+
+## Ejemplo: Logging con AOP {.smaller}
+
+```java
+@Aspect
+@Component
+public class LoggingAspect {
+
+    // Pointcut: todos los métodos públicos en paquete service
+    @Around("execution(* com.arka.*.service.*.*(..))")
+    public Object logExecution(ProceedingJoinPoint joinPoint) throws Throwable {
+        String method = joinPoint.getSignature().toShortString();
+        long start = System.currentTimeMillis();
+
+        log.info("→ Entrando a {}", method);
+        try {
+            Object result = joinPoint.proceed(); // ← Ejecuta el método real
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("← {} completado en {}ms", method, elapsed);
+            return result;
+        } catch (Exception e) {
+            log.error("✗ {} falló: {}", method, e.getMessage());
+            throw e;
+        }
+    }
+}
+```
+
+::: {.callout-note}
+`@Around` es el advice más poderoso: controla si el método se ejecuta, puede modificar argumentos y resultado.
+:::
+
+---
+
+## Ejemplo: Rate Limiting con AOP {.smaller}
+
+::: columns
+::: {.column width="50%"}
+**Anotación personalizada**
+
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface RateLimited {
+    int maxCalls() default 100;
+    int periodSeconds() default 60;
+}
+```
+
+**Uso**
+
+```java
+@RateLimited(maxCalls = 50)
+@GetMapping("/api/products")
+public List<Product> findAll() { ... }
+```
+:::
+
+::: {.column width="50%"}
+**Aspect que lo implementa**
+
+```java
+@Aspect
+@Component
+public class RateLimitAspect {
+    private final Map<String, AtomicInteger>
+        counters = new ConcurrentHashMap<>();
+
+    @Around("@annotation(rateLimited)")
+    public Object enforce(
+            ProceedingJoinPoint jp,
+            RateLimited rateLimited)
+            throws Throwable {
+        String key = jp.getSignature()
+            .toShortString();
+        AtomicInteger counter = counters
+            .computeIfAbsent(key,
+                k -> new AtomicInteger(0));
+        if (counter.incrementAndGet()
+                > rateLimited.maxCalls()) {
+            throw new TooManyRequestsException(
+                "Rate limit exceeded");
+        }
+        return jp.proceed();
+    }
+}
+```
+:::
+:::
+
+
+
+# Bloque 2: Spring Cloud
+
+El ecosistema para construir **microservicios distribuidos** en la nube.
+
+---
+
+## Objetivo del bloque Spring Cloud {.smaller .objective}
+
+- Reconocer patrones distribuidos que resuelve Spring Cloud.
+- Conocer el rol de cada proyecto principal.
+- Ver flujos reales con ejemplos Java y diagramas Mermaid.
+
+---
+
+## ¿Qué es Spring Cloud? {.smaller}
+
+Spring Cloud proporciona herramientas para patrones comunes en sistemas distribuidos:
+
+```{mermaid}
+mindmap
+  root((Spring Cloud))
+    Configuración
+      Config Server
+      Config Client
+    Routing
+      API Gateway
+      Load Balancer
+    Resiliencia
+      Circuit Breaker
+      Resilience4j
+      Retry / Bulkhead
+    Mensajería
+      Cloud Stream
+      Kafka Binder
+      RabbitMQ Binder
+    Comunicación
+      OpenFeign
+      WebClient
+    Observabilidad
+      Micrometer Tracing
+      Zipkin / Tempo
+```
+
+---
+
+## Ecosistema Spring Cloud {.smaller .compact-mermaid}
+
+```{mermaid}
+graph LR
+    CLIENT[Cliente] --> GW[API Gateway]
+    GW --> MS1[ms-orders]
+    GW --> MS2[ms-inventory]
+    GW --> MS3[ms-payments]
+    MS1 & MS2 & MS3 --> KAFKA[(Kafka)]
+    CS[Config Server] -.-> MS1 & MS2 & MS3
+
+    style GW fill:#ff79c6,color:#fff
+    style CS fill:#f1fa8c,color:#000
+    style KAFKA fill:#bd93f9,color:#fff
+```
+
+::: {.notes}
+- Este diagrama es la vista de alto nivel de una arquitectura de microservicios con Spring Cloud.
+- Cada componente resuelve un problema diferente.
+:::
+
+
+
+# Spring Cloud Discovery Service
+
+Registro y descubrimiento de servicios para evitar IPs fijas.
+
+::: {.notes}
+- Eureka es el ejemplo clasico, pero tambien existen Consul y Kubernetes.
+- Permite que los servicios se encuentren por nombre.
+:::
+
+---
+
+## Objetivo: Discovery Service {.smaller .objective}
+
+- Resolver el problema de "¿donde esta mi servicio?".
+- Habilitar escalado sin reconfigurar clientes.
+- Ser la base del routing dinamico en Gateway.
+
+---
+
+## Discovery + Gateway Routing {.smaller .compact-mermaid}
+
+```{mermaid}
+flowchart LR
+  CLIENT[Cliente] --> GW[Gateway]
+  GW --> REG[Service Registry]
+  REG -->|ms-orders| MS1[ms-orders]
+  REG -->|ms-inventory| MS2[ms-inventory]
+
+  style GW fill:#ff79c6,color:#fff
+  style REG fill:#8be9fd,color:#000
+```
+
+El Gateway consulta el registro para resolver instancias disponibles.
+
+---
+
+## Discovery Client en Java {.smaller}
+
+```java
+@RestController
+@RequestMapping("/api/discovery")
+public class DiscoveryController {
+
+  private final DiscoveryClient discoveryClient;
+
+  public DiscoveryController(DiscoveryClient discoveryClient) {
+    this.discoveryClient = discoveryClient;
+  }
+
+  @GetMapping("/services")
+  public List<String> services() {
+    return discoveryClient.getServices();
+  }
+}
+```
+
+::: {.callout-tip}
+Con Eureka: agrega `spring-cloud-starter-netflix-eureka-client` y registra el servicio automaticamente.
+:::
+
+
+# Spring Cloud Config Server
+
+Configuración **centralizada** y **externalizada** para todos los microservicios.
+
+::: {.notes}
+- Problema: cada microservicio tiene su application.yml con datos como URLs de BD, claves, etc.
+- Config Server centraliza todo en un solo lugar (Git, vault, etc.).
+:::
+
+---
+
+## Objetivo: Config Server {.smaller .objective}
+
+- Centralizar configuraciones en un repositorio seguro.
+- Cambiar parametros sin redeploy.
+- Mantener consistencia entre ambientes.
+
+---
+
+## Arquitectura de Config Server {.smaller .compact-mermaid}
+
+```{mermaid}
+graph LR
+    GIT[(Git Repo)] --> CS[Config Server]
+    CS -->|GET /ms-orders/prod| MS1[ms-orders]
+    CS -->|GET /ms-inventory/prod| MS2[ms-inventory]
+    CS -->|GET /ms-payments/prod| MS3[ms-payments]
+
+    style CS fill:#f1fa8c,color:#000
+    style GIT fill:#50fa7b,color:#000
+```
+
+El Config Server sirve configuraciones por **aplicación** y **perfil** desde un repositorio Git.
+
+---
+
+## Config Server: Implementación {.smaller}
+
+```java
+// Config Server (microservicio dedicado)
+@SpringBootApplication
+@EnableConfigServer // ← Una sola anotación
+public class ConfigServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigServerApplication.class, args);
+    }
+}
+```
+
+```yaml
+# application.yml del Config Server
+server:
+  port: 8888
+
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/arka/config-repo
+          default-label: main
+          search-paths: "{application}"
+```
+
+---
+
+## Config Client: Consumir Configuración {.smaller}
+
+```yaml
+# application.yml del microservicio (ms-orders)
+spring:
+  application:
+    name: ms-orders   # ← Identifica qué config pedir
+  config:
+    import: configserver:http://config-server:8888
+
+# En el repo Git: ms-orders.yml
+spring:
+  datasource:
+    url: jdbc:postgresql://db-orders:5432/orders
+    username: ${DB_USER}
+    password: ${DB_PASS}
+
+app:
+  inventory:
+    url: http://ms-inventory:8080
+```
+
+::: {.callout-tip}
+Con `@RefreshScope` + endpoint `/actuator/refresh` puedes recargar configuración **sin reiniciar** el servicio.
+:::
+
+---
+
+## Refresh Dinámico con @RefreshScope {.smaller}
+
+```java
+@RestController
+@RefreshScope // ← Recrea el bean al hacer POST /actuator/refresh
+public class FeatureFlagController {
+
+    @Value("${app.feature.new-checkout:false}")
+    private boolean newCheckoutEnabled;
+
+    @GetMapping("/api/features/checkout")
+    public Map<String, Boolean> checkoutFlag() {
+        return Map.of("newCheckout", newCheckoutEnabled);
+    }
+}
+```
+
+```bash
+# Cambiar valor en Git repo, luego:
+curl -X POST http://ms-orders:8080/actuator/refresh
+# Respuesta: ["app.feature.new-checkout"]
+```
+
+::: {.notes}
+- En producción con Spring Cloud Bus, el refresh se propaga automáticamente a TODOS los servicios.
+- Ideal para feature flags, límites de rate, URLs de servicios externos.
+:::
+
+---
+
+## Flujo de Refresh de Configuración {.smaller .compact-mermaid}
+
+```{mermaid}
+sequenceDiagram
+  participant Dev as Config Repo
+  participant CS as Config Server
+  participant App as ms-orders
+  participant Act as Actuator
+
+  Dev->>CS: Push cambios
+  App->>CS: GET config actualizada
+  Act->>App: POST /actuator/refresh
+  App-->>App: Recarga beans @RefreshScope
+```
+
+
+
+# Spring Cloud Gateway
+
+Punto de entrada único para todos los microservicios.
+
+::: {.notes}
+- El API Gateway resuelve: routing, seguridad centralizada, rate limiting, load balancing.
+- Construido sobre WebFlux (reactivo) — alto rendimiento.
+:::
+
+---
+
+## Objetivo: API Gateway {.smaller .objective}
+
+- Centralizar routing y politicas de seguridad.
+- Simplificar el acceso del cliente a un solo endpoint.
+- Aplicar filtros y observabilidad de forma consistente.
+
+---
+
+## ¿Por qué un API Gateway? {.smaller}
+
+Un Gateway actúa como **punto de entrada único** para todos los microservicios.
+
+::: columns
+::: {.column width="50%"}
+**Sin Gateway**
+```{mermaid}
+graph TB
+    C1[Cliente] --> MS1[":8081"]
+    C1 --> MS2[":8082"]
+    C1 --> MS3[":8083"]
+```
+:::
+::: {.column width="50%"}
+**Con Gateway**
+```{mermaid}
+graph TB
+    C2[Cliente] --> GW[":8080"]
+    GW --> MS4[orders]
+    GW --> MS5[inventory]
+    GW --> MS6[payments]
+    style GW fill:#ff79c6,color:#fff
+```
+:::
+:::
+
+---
+
+## Ventajas del API Gateway {.smaller}
+
+| | Sin Gateway | Con Gateway |
+|---|---|---|
+| **URLs** | Cliente conoce N puertos/IPs | Cliente conoce 1 URL |
+| **Auth** | Duplicada en cada servicio | Centralizada en el Gateway |
+| **Rate Limiting** | Implementado por servicio | Un solo punto de control |
+| **CORS** | Configurado en cada servicio | Centralizado |
+| **SSL** | Terminado por servicio | Terminado en el Gateway |
+| **Logging** | Disperso | Centralizado |
+
+::: {.callout-tip}
+Spring Cloud Gateway está construido sobre **WebFlux** (reactivo) — alto rendimiento y soporte nativo para filtros.
+:::
+
+---
+
+## Configuración del Gateway {.smaller}
+
+```yaml
+# application.yml del Gateway
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: orders-service
+          uri: http://ms-orders:8080
+          predicates:
+            - Path=/api/orders/**
+
+        - id: inventory-service
+          uri: http://ms-inventory:8080
+          predicates:
+            - Path=/api/inventory/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: inventoryCB
+                fallbackUri: forward:/fallback/inventory
+
+        - id: payments-service
+          uri: http://ms-payments:8080
+          predicates:
+            - Path=/api/payments/**
+```
+
+---
+
+## Filtros del Gateway {.smaller .code-tight}
+
+```java
+@Component
+public class CorrelationIdFilter
+        implements GlobalFilter, Ordered {
+
+    @Override
+    public Mono<Void> filter(
+            ServerWebExchange exchange,
+            GatewayFilterChain chain) {
+        String corrId = exchange.getRequest()
+            .getHeaders().getFirst("X-Correlation-Id");
+        if (corrId == null) {
+            corrId = UUID.randomUUID().toString();
+        }
+        exchange.getRequest().mutate()
+            .header("X-Correlation-Id", corrId);
+
+        final String id = corrId;
+        return chain.filter(exchange)
+            .then(Mono.fromRunnable(() ->
+                exchange.getResponse().getHeaders()
+                    .add("X-Correlation-Id", id)));
+    }
+
+    @Override
+    public int getOrder() { return -1; }
+}
+```
+
+::: {.notes}
+- Los filtros globales aplican a TODAS las rutas.
+- Orden negativo = se ejecuta temprano en la cadena.
+:::
+
+
+
+# Circuit Breaker & Resilience4j
+
+Proteger tus servicios contra **fallos en cascada**.
+
+::: {.notes}
+- En microservicios, una dependencia caída puede tumbar toda la cadena.
+- Circuit Breaker "abre el circuito" cuando detecta fallos repetidos, evitando saturar al servicio enfermo.
+:::
+
+---
+
+## Objetivo: Circuit Breaker {.smaller .objective}
+
+- Cortar llamadas a servicios inestables.
+- Evitar cascadas de fallos y tiempos de espera.
+- Definir fallbacks y reintentos controlados.
+
+---
+
+## Estados del Circuit Breaker {.smaller}
+
+```{mermaid}
+stateDiagram-v2
+    [*] --> CLOSED
+
+    CLOSED --> OPEN : Tasa de fallos ≥ umbral
+    OPEN --> HALF_OPEN : Timeout expira
+    HALF_OPEN --> CLOSED : Llamadas de prueba exitosas
+    HALF_OPEN --> OPEN : Llamadas de prueba fallan
+
+    CLOSED : ✅ Peticiones pasan normalmente
+    OPEN : 🔴 Peticiones rechazadas inmediatamente
+    HALF_OPEN : 🟡 Permitir pocas peticiones de prueba
+```
+
+| Estado | Comportamiento |
+|--------|---------------|
+| **CLOSED** | Todo funciona, las llamadas pasan |
+| **OPEN** | Servicio caído, retorna fallback o error inmediato |
+| **HALF_OPEN** | Prueba con pocas llamadas si el servicio se recuperó |
+
+---
+
+## Configuración de Resilience4j {.smaller}
+
+```yaml
+# application.yml
+resilience4j:
+  circuitbreaker:
+    instances:
+      inventoryService:
+        slidingWindowSize: 10            # Últimas 10 llamadas
+        failureRateThreshold: 50         # Abre si 50% fallan
+        waitDurationInOpenState: 10s     # Espera 10s antes de HALF_OPEN
+        permittedNumberOfCallsInHalfOpenState: 3  # 3 llamadas de prueba
+        slowCallRateThreshold: 80        # 80% llamadas lentas = fallo
+        slowCallDurationThreshold: 2s    # >2s = llamada lenta
+
+  retry:
+    instances:
+      inventoryService:
+        maxAttempts: 3
+        waitDuration: 1s
+        retryExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+```
+
+---
+
+## Usando Resilience4j en Código {.smaller .code-tight}
+
+```java
+@Service
+public class InventoryClient {
+
+    private final WebClient webClient;
+
+    @CircuitBreaker(name = "inventoryService", fallbackMethod = "fallbackStock")
+    @Retry(name = "inventoryService")
+    public Mono<StockResponse> checkStock(String sku) {
+        return webClient.get()
+            .uri("/api/inventory/{sku}", sku)
+            .retrieve()
+            .bodyToMono(StockResponse.class)
+            .timeout(Duration.ofSeconds(3));
+    }
+
+    // Fallback: se ejecuta cuando el circuito está OPEN o hay error
+    private Mono<StockResponse> fallbackStock(String sku, Throwable t) {
+        log.warn("Fallback para sku={}: {}", sku, t.getMessage());
+        return Mono.just(new StockResponse(sku, 0, false,
+            "Servicio temporalmente no disponible"));
+    }
+}
+```
+
+::: {.callout-warning}
+El método fallback debe tener **la misma firma** + `Throwable` como último parámetro.
+:::
+
+---
+
+## Patrones de Resilience4j {.smaller .compact-mermaid}
+
+```{mermaid}
+graph LR
+    REQ[Request] --> CB{Circuit Breaker}
+    CB -->|CLOSED| RT{Retry}
+    CB -->|OPEN| FB[Fallback]
+    RT -->|OK| RES[Response]
+    RT -->|Fallo| FB
+    FB --> RES
+
+    style CB fill:#ff5555,color:#fff
+    style RT fill:#ffb86c,color:#000
+    style FB fill:#50fa7b,color:#000
+```
+
+---
+
+## Resumen de Patrones {.smaller}
+
+| Patrón | Propósito |
+|--------|----------|
+| **Circuit Breaker** | Abrir circuito ante fallos |
+| **Retry** | Reintentar fallos transitorios |
+| **Bulkhead** | Limitar concurrencia |
+| **Rate Limiter** | Limitar llamadas/seg |
+| **Time Limiter** | Timeout por llamada |
+
+
+
+# Spring Cloud Function
+
+Modelo unificado para exponer logica de negocio como funciones.
+
+::: {.notes}
+- Permite reutilizar la misma funcion en HTTP, mensajeria o serverless.
+- Reduce el acoplamiento con frameworks de transporte.
+:::
+
+---
+
+## Objetivo: Cloud Function {.smaller .objective}
+
+- Encapsular logica en funciones reutilizables.
+- Exponerla en multiples plataformas sin reescribir.
+- Facilitar testing y composicion funcional.
+
+---
+
+## Funcion en Java {.smaller}
+
+```java
+@Configuration
+public class PricingFunctions {
+
+    @Bean
+    public Function<OrderRequest, OrderPrice> priceOrder(PricingService pricing) {
+        return req -> pricing.calculate(req);
+    }
+}
+```
+
+```yaml
+# application.yml (exponer funcion por HTTP)
+spring:
+  cloud:
+    function:
+      definition: priceOrder
+```
+
+::: {.callout-note}
+La misma funcion puede recibir mensajes en Kafka o invocarse via HTTP.
+:::
+
+
+# Spring Cloud Stream
+
+Abstracción para **mensajería event-driven** con Kafka o RabbitMQ.
+
+::: {.notes}
+- Spring Cloud Stream abstrae el broker: puedes cambiar de Kafka a RabbitMQ con solo cambiar dependencias.
+- Es la base de arquitecturas SAGA y event sourcing en Spring.
+:::
+
+---
+
+## Objetivo: Cloud Stream {.smaller .objective}
+
+- Enviar y recibir eventos sin acoplarse al broker.
+- Escalar consumidores con grupos.
+- Construir flujos event-driven confiables.
+
+---
+
+## Arquitectura de Cloud Stream {.smaller .compact-mermaid}
+
+```{mermaid}
+graph LR
+    APP[Aplicación] --> BINDER[Binder]
+    BINDER --> BROKER[(Kafka / RabbitMQ)]
+    BROKER --> BINDER2[Binder]
+    BINDER2 --> APP2[Otra Aplicación]
+
+    style BINDER fill:#bd93f9,color:#fff
+    style BINDER2 fill:#bd93f9,color:#fff
+    style BROKER fill:#50fa7b,color:#000
+```
+
+| Concepto | Descripción |
+|----------|-------------|
+| **Binder** | Integración con el broker (Kafka, RabbitMQ) |
+| **Binding** | Puente entre código de la app y el broker |
+| **Message** | Datos estructurados (headers + payload) |
+| **Consumer Group** | Asegurar que solo 1 instancia procese cada mensaje |
+
+---
+
+## Productor y Consumidor con Cloud Stream {.smaller .code-tight}
+
+```java
+// Productor: publica eventos
+@Service
+public class OrderEventPublisher {
+
+    private final StreamBridge streamBridge;
+
+    public void publishOrderCreated(Order order) {
+        OrderCreatedEvent event = new OrderCreatedEvent(
+            order.getId(), order.getSku(), order.getQuantity());
+        streamBridge.send("order-events-out-0", event);
+    }
+}
+
+// Consumidor: procesa eventos (enfoque funcional)
+@Configuration
+public class InventoryEventConsumer {
+
+    @Bean
+    public Consumer<OrderCreatedEvent> processOrderCreated(InventoryService service) {
+        return event -> {
+            log.info("Recibido evento: orderId={}", event.orderId());
+            service.reserveStock(event.sku(), event.quantity());
+        };
+    }
+}
+```
+
+---
+
+## Configuración Cloud Stream con Kafka {.smaller .code-tight}
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        order-events-out-0:                 # Nombre del binding de salida
+          destination: order-created         # Topic de Kafka
+          content-type: application/json
+
+        processOrderCreated-in-0:            # Input (nombre del @Bean + -in-0)
+          destination: order-created          # Mismo topic
+          group: inventory-service            # Consumer group
+          content-type: application/json
+
+      kafka:
+        binder:
+          brokers: kafka:9092
+          auto-create-topics: true
+          replication-factor: 1
+```
+
+::: {.callout-note}
+Convención de nombres: `<nombreBean>-in-0` para input, `<nombreBean>-out-0` para output.
+:::
+
+---
+
+## Flujo SAGA con Cloud Stream {.smaller .compact-mermaid}
+
+```{mermaid}
+sequenceDiagram
+    participant O as ms-orders
+    participant K as Kafka
+    participant I as ms-inventory
+    participant P as ms-payments
+
+    O->>K: order-created
+    K->>I: order-created
+    I->>K: stock-reserved
+    K->>P: stock-reserved
+    P->>K: payment-completed
+    K->>O: payment-completed
+```
+
+::: {.notes}
+- Conexión directa con el lab de Arka: esta es exactamente la SAGA coreografiada que implementamos.
+- Compensaciones: si payment-failed → se publica evento → inventory libera stock.
+:::
+
+
+
+# OpenFeign: Cliente HTTP Declarativo
+
+Llamadas HTTP entre microservicios sin boilerplate.
+
+::: {.notes}
+- OpenFeign es como un "@Repository" pero para APIs HTTP.
+- Se define una interfaz y Spring genera la implementación automáticamente.
+:::
+
+---
+
+## Objetivo: OpenFeign {.smaller .objective}
+
+- Declarar clientes HTTP con interfaces simples.
+- Integrar balanceo y resiliencia sin codigo extra.
+- Reducir boilerplate de consumo de APIs internas.
+
+---
+
+## Feign vs WebClient {.smaller}
+
+| Aspecto | OpenFeign | WebClient |
+|---------|-----------|-----------|
+| **Estilo** | Declarativo (interfaz) | Imperativo/Funcional |
+| **Stack** | Bloqueante (servlet) | No-bloqueante (reactivo) |
+| **Boilerplate** | Mínimo | Más control manual |
+| **Integración** | Load Balancer, Circuit Breaker automáticos | Manual |
+| **Cuándo usar** | MVC + CRUD simple entre servicios | WebFlux + alta concurrencia |
+
+---
+
+## Usando OpenFeign {.smaller .code-tight}
+
+```java
+// 1. Habilitar Feign en la app
+@SpringBootApplication
+@EnableFeignClients
+public class OrdersApplication {}
+
+// 2. Definir el cliente (solo interfaz)
+@FeignClient(name = "ms-inventory", url = "${app.inventory.url}",
+    fallback = InventoryFallback.class)
+public interface InventoryClient {
+
+    @GetMapping("/api/inventory/{sku}")
+    StockResponse checkStock(@PathVariable String sku);
+
+    @PostMapping("/api/inventory/reserve")
+    ReservationResponse reserveStock(@RequestBody ReserveRequest request);
+}
+
+// 3. Fallback para Circuit Breaker
+@Component
+public class InventoryFallback implements InventoryClient {
+    public StockResponse checkStock(String sku) {
+        return new StockResponse(sku, 0, false, "Servicio no disponible");
+    }
+    public ReservationResponse reserveStock(ReserveRequest request) {
+        return ReservationResponse.failed("Servicio no disponible");
+    }
+}
+```
+
+---
+
+## Feign: Interceptores y Config {.smaller .code-tight}
+
+```java
+// Interceptor: agregar auth header a todas las llamadas Feign
+@Configuration
+public class FeignConfig {
+
+    @Bean
+    public RequestInterceptor authInterceptor() {
+        return template -> {
+            String token = SecurityContextHolder.getContext()
+                .getAuthentication().getCredentials().toString();
+            template.header("Authorization", "Bearer " + token);
+        };
+    }
+}
+```
+
+```yaml
+# Configuración de timeouts y logging
+spring:
+  cloud:
+    openfeign:
+      client:
+        config:
+          ms-inventory:
+            connect-timeout: 3000
+            read-timeout: 5000
+            logger-level: BASIC
+      micrometer:
+        enabled: true   # Métricas automáticas
+```
+
+
+
+# Spring Security
+
+Seguridad centralizada con filtros y configuraciones declarativas.
+
+::: {.notes}
+- En Spring Boot 3.x se usa SecurityFilterChain.
+- La seguridad se define por endpoints y roles.
+:::
+
+---
+
+## Objetivo: Spring Security {.smaller .objective}
+
+- Proteger endpoints con autenticacion y autorizacion.
+- Aplicar politicas por ruta o rol.
+- Integrar JWT para APIs stateless.
+
+---
+
+## Configuracion Basica {.smaller}
+
+```java
+@Configuration
+public class SecurityConfig {
+
+  @Bean
+  public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    return http
+      .csrf(csrf -> csrf.disable())
+      .authorizeHttpRequests(auth -> auth
+        .requestMatchers("/api/auth/**").permitAll()
+        .anyRequest().authenticated())
+      .build();
+  }
+}
+```
+
+---
+
+## Objetivo: JWT + Refresh Token {.smaller .objective}
+
+- Mantener APIs stateless con tokens cortos.
+- Renovar sesiones sin re-login constante.
+- Reducir riesgo con rotacion de refresh tokens.
+
+---
+
+## JWT + Refresh Token {.smaller}
+
+```{mermaid}
+sequenceDiagram
+  participant C as Cliente
+  participant A as Auth API
+  participant R as Resource API
+
+  C->>A: POST /login
+  A-->>C: access_token + refresh_token
+  C->>R: GET /api/orders (access_token)
+  R-->>C: 200 OK
+  C->>A: POST /refresh (refresh_token)
+  A-->>C: nuevo access_token
+```
+
+::: {.notes}
+- Enfatizar que el access token es corto y el refresh permite renovar sin login.
+- Mencionar rotacion y revocacion como buenas practicas.
+:::
+
+---
+
+## Filtro JWT en Java {.smaller .code-tight}
+
+```java
+@Component
+public class JwtAuthFilter extends OncePerRequestFilter {
+
+  private final JwtService jwtService;
+
+  @Override
+  protected void doFilterInternal(HttpServletRequest request,
+                  HttpServletResponse response,
+                  FilterChain filterChain) throws ServletException, IOException {
+    String auth = request.getHeader("Authorization");
+    if (auth != null && auth.startsWith("Bearer ")) {
+      String token = auth.substring(7);
+      Authentication authentication = jwtService.toAuthentication(token);
+      SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+    filterChain.doFilter(request, response);
+  }
+}
+```
+
+::: {.callout-tip}
+Usa access tokens cortos (ej. 10-15 min) y refresh tokens con rotacion.
+:::
+
+
+
+# Spring AI
+
+Integracion de IA generativa con el ecosistema Spring.
+
+::: {.notes}
+- Spring AI simplifica el acceso a proveedores como OpenAI o Azure OpenAI.
+- Se integra con el estilo de Spring (beans, configuracion y templates).
+:::
+
+---
+
+## Objetivo: Spring AI {.smaller .objective}
+
+- Conectar modelos de lenguaje desde Spring Boot.
+- Centralizar prompts y respuestas en servicios.
+- Integrar IA en flujos existentes de negocio.
+
+---
+
+## Ejemplo Basico con ChatClient {.smaller}
+
+```java
+@Service
+public class AssistantService {
+
+  private final ChatClient chatClient;
+
+  public AssistantService(ChatClient chatClient) {
+    this.chatClient = chatClient;
+  }
+
+  public String resumenPedido(String texto) {
+    return chatClient.prompt()
+      .user("Resume este pedido: " + texto)
+      .call()
+      .content();
+  }
+}
+```
+
+
+# Observabilidad Distribuida
+
+**Tracing distribuido** para seguir una petición a través de múltiples servicios.
+
+::: {.notes}
+- En microservicios, un request pasa por 3-5 servicios. Sin tracing, depurar es imposible.
+- Spring Boot 3.x usa Micrometer Tracing (reemplaza a Spring Cloud Sleuth).
+:::
+
+---
+
+## Objetivo: Observabilidad {.smaller .objective}
+
+- Rastrear solicitudes end-to-end.
+- Correlacionar logs entre servicios.
+- Visualizar latencias y cuellos de botella.
+
+---
+
+## Trace Context: El Hilo Conductor {.smaller}
+
+::: columns
+::: {.column width="55%"}
+```{mermaid}
+graph LR
+    subgraph "Trace ID: abc-123"
+        GW[Gateway] --> MS1[ms-orders]
+        MS1 --> MS2[ms-inventory]
+        MS1 --> MS3[ms-payments]
+    end
+
+    style GW fill:#ff79c6,color:#fff
+    style MS1 fill:#8be9fd,color:#000
+    style MS2 fill:#50fa7b,color:#000
+    style MS3 fill:#ffb86c,color:#000
+```
+:::
+
+::: {.column width="45%"}
+| Concepto | Descripción |
+|----------|-------------|
+| **Trace** | Historia completa de un request |
+| **Span** | Operación individual dentro del trace |
+| **Trace ID** | ID que viaja por TODOS los servicios |
+| **Span ID** | ID de cada operación |
+:::
+:::
+
+---
+
+## Configuración con Micrometer Tracing {.smaller .code-tight}
+
+```yaml
+# application.yml (en cada microservicio)
+management:
+  tracing:
+    sampling:
+      probability: 1.0    # 100% en dev, ~10% en producción
+  zipkin:
+    tracing:
+      endpoint: http://zipkin:9411/api/v2/spans
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
+```
+
+```xml
+<!-- Dependencias clave (pom.xml) -->
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-tracing-bridge-otel</artifactId>
+</dependency>
+<dependency>
+    <groupId>io.opentelemetry</groupId>
+    <artifactId>opentelemetry-exporter-zipkin</artifactId>
+</dependency>
+```
+
+---
+
+## Log Correlacionado {.smaller}
+
+Con Micrometer Tracing, los logs incluyen automáticamente el Trace ID:
+
+```text
+INFO [ms-orders,abc123def456,span-001] Creando orden SKU=GPU-4090
+INFO [ms-inventory,abc123def456,span-002] Reservando stock para GPU-4090
+INFO [ms-payments,abc123def456,span-003] Procesando pago para orden #42
+```
+
+Todos comparten el **mismo Trace ID** → puedes buscar `abc123def456` en tu agregador de logs y ver todo el flujo.
+
+::: {.callout-tip}
+En producción, exporta traces a **Zipkin**, **Jaeger** o **Grafana Tempo** para visualización.
+:::
+
+
+
+# Resumen & Mapa Conceptual
+
+---
+
+## Mapa Completo Spring Cloud {.smaller}
+
+```{mermaid}
+mindmap
+  root((Spring Cloud))
+    Spring Extras
+      Scheduling
+        @Scheduled
+        fixedRate/fixedDelay
+        Cron expressions
+      Caching
+        @Cacheable
+        Redis / Caffeine
+      Eventos
+        ApplicationEventPublisher
+        @EventListener
+        @TransactionalEventListener
+      AOP
+        @Aspect / @Around
+        Cross-cutting concerns
+    Discovery
+      Service Registry
+      Eureka / Consul
+    Config
+      Config Server
+      Git-backed
+      @RefreshScope
+    Gateway
+      Routing
+      Filtros globales
+      Rate limiting
+    Resiliencia
+      Circuit Breaker
+      Retry
+      Bulkhead
+      Resilience4j
+    Functions
+      Spring Cloud Function
+      Reuso multi-plataforma
+    Mensajería
+      Cloud Stream
+      Kafka Binder
+      StreamBridge
+      SAGA Pattern
+    Comunicación
+      OpenFeign
+      @FeignClient
+      Interceptores
+    Seguridad
+      Spring Security
+      JWT / Refresh Token
+    Observabilidad
+      Micrometer Tracing
+      Trace ID / Span ID
+      Zipkin / Tempo
+    IA
+      Spring AI
+      Prompts y modelos
+```
+
+
+
+# Cierre Bloque 1: Spring Extras {.smaller}
+
+- Scheduling, Caching, Eventos y AOP mejoran apps monoliticas.
+- Preparan el salto a arquitectura distribuida.
+- Ahora pasamos a Spring Cloud y sus patrones en microservicios.
+
+
+---
+
+## Tabla Resumen de Componentes (1/2) {.smaller}
+
+| Componente | Starter | Problema |
+|------------|---------|----------|
+| **Discovery (Eureka)** | `spring-cloud-starter-netflix-eureka-client` | Registro y descubrimiento |
+| **Config Server** | `spring-cloud-config-server` | Config centralizada |
+| **API Gateway** | `spring-cloud-starter-gateway` | Routing + seguridad |
+| **Resilience4j** | `spring-cloud-starter-circuitbreaker-resilience4j` | Fallos en cascada |
+| **Cloud Function** | `spring-cloud-function-context` | Logica reusable |
+| **Cloud Stream** | `spring-cloud-starter-stream-kafka` | Mensajería event-driven |
+
+---
+
+## Tabla Resumen de Componentes (2/2) {.smaller}
+
+| Componente | Starter | Problema |
+|------------|---------|----------|
+| **OpenFeign** | `spring-cloud-starter-openfeign` | Clientes HTTP |
+| **Spring Security** | `spring-boot-starter-security` | Autenticación |
+| **JWT** | `jjwt-api` / `nimbus-jose-jwt` | Tokens stateless |
+| **Micrometer Tracing** | `micrometer-tracing-bridge-otel` | Tracing distribuido |
+| **Spring AI** | `spring-ai-openai-spring-boot-starter` | Integración IA |
+
+---
+
+## ¿Cuándo usar cada componente? {.smaller}
+
+| Si necesitas... | Usa |
+|-----------------|-----|
+| Encontrar instancias disponibles | **Discovery Service** (Eureka/Consul) |
+| Cambiar config sin reiniciar | **Config Server** + `@RefreshScope` |
+| Un solo punto de entrada para clientes | **API Gateway** |
+| Proteger contra servicios caídos | **Circuit Breaker** / Resilience4j |
+| Reutilizar logica en HTTP y eventos | **Spring Cloud Function** |
+| Comunicación async entre servicios | **Cloud Stream** (Kafka/RabbitMQ) |
+| Llamar otros servicios por HTTP (MVC) | **OpenFeign** |
+| Llamar otros servicios por HTTP (Reactivo) | **WebClient** |
+| Proteger APIs con JWT | **Spring Security** + JWT |
+| Seguir un request cruzando servicios | **Micrometer Tracing** |
+| Agregar IA generativa al negocio | **Spring AI** |
+| Ejecutar tareas periódicas | **@Scheduled** |
+| Reducir latencia con caché | **@Cacheable** con Redis |
+
+---
+
+## Recursos Oficiales {.smaller}
+
+- [Spring Cloud Documentation](https://spring.io/projects/spring-cloud)
+- [Spring Cloud Netflix (Eureka)](https://spring.io/projects/spring-cloud-netflix)
+- [Spring Cloud Config](https://docs.spring.io/spring-cloud-config/reference/)
+- [Spring Cloud Gateway](https://docs.spring.io/spring-cloud-gateway/reference/)
+- [Spring Cloud Circuit Breaker](https://docs.spring.io/spring-cloud-circuitbreaker/reference/)
+- [Spring Cloud Function](https://spring.io/projects/spring-cloud-function)
+- [Spring Cloud Stream](https://docs.spring.io/spring-cloud-stream/reference/)
+- [Spring Cloud OpenFeign](https://docs.spring.io/spring-cloud-openfeign/reference/)
+- [Spring Security](https://spring.io/projects/spring-security)
+- [Spring AI](https://spring.io/projects/spring-ai)
+- [Micrometer Tracing](https://micrometer.io/docs/tracing)
+- [Resilience4j](https://resilience4j.readme.io/docs)
