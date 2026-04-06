@@ -1,0 +1,12 @@
+.github
+.specify
+.vscode
+specs
+index_files
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.idea/
+*.xlsx
+*.pdf

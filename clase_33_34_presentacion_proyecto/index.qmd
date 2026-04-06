@@ -1,0 +1,292 @@
+---
+title: "Panel de Expertos: Como Presentar y Defender tu Proyecto"
+subtitle: "Guia practica basada en la guia tecnica, guia de panel y rubrica oficial"
+format:
+  revealjs:
+    slide-level: 2
+    slide-number: true
+    theme: dracula
+    chalkboard:
+      buttons: true
+    preview-links: auto
+    highlight-style: github
+    logo: images/enyoi.png
+    css: styles.css
+    code-block-height: 460px
+    lang: es
+    navigation-mode: vertical
+    transition: slide
+    controls-back-arrows: visible
+    controls-layout: bottom-right
+    mermaid:
+      theme: dark
+    footer: "Panel Tecnico - ENYOI"
+---
+
+# Agenda {.smaller}
+
+- Como te evaluan realmente (rubrica y pesos).
+- Estructura recomendada para 45 minutos.
+- Tips de presentacion para comunicar con claridad.
+- Preguntas probables y como responder segun tu arquitectura.
+- Errores comunes que debes evitar.
+- Checklist final de ensayo.
+
+# Objetivo de esta sesion {.smaller .objective}
+
+Salir con un plan concreto para que tu presentacion sea:
+
+- Tecnicamente solida.
+- Clara en decisiones de arquitectura.
+- Evidenciable frente al panel (codigo, pruebas, pipeline, nube).
+
+# Como te evaluan: mapa de rubrica {.smaller}
+
+## Criterios y ponderacion oficial
+
+| Criterio | Ponderado |
+|---|---:|
+| Protocolos REST + HTTP | 2 |
+| Framework (Spring Boot/WebFlux/documentacion) | 4 |
+| Pruebas unitarias (JUnit/Mockito/JaCoCo) | 2 |
+| Bases de datos relacionales y transacciones | 2 |
+| Buenas practicas (codigo limpio + patrones + DDD/hexagonal) | 4 |
+| Documentacion de APIs | 1 |
+| SDLC / CI-CD | 2 |
+| Cloud / AWS | 3 |
+| **Total** | **20** |
+
+## Implicacion practica {.smaller}
+
+- Tu mejor palanca de puntaje esta en Framework + Buenas practicas + Cloud.
+- No descuides Documentacion: vale menos, pero es evidencia rapida de madurez.
+- Si afirmas algo, debes mostrarlo en el repositorio o en ejecucion.
+
+# Estructura recomendada (45 min) {.smaller}
+
+::: columns 
+::: { style="font-size:1.2rem" }
+::: {.column width="50%"}
+**Flujo sugerido por la guia del panel**
+
+1. Introduccion breve: 2-3 min.
+2. Arquitectura y enfoque tecnico: 10 min.
+3. Historias de usuario: 5-7 min.
+4. Demo de codigo: 15-20 min.
+5. Reflexion y cierre: 5 min.
+:::
+
+::: {.column width="50%"}
+**Que busca el panel en cada bloque**
+
+- Introduccion: contexto y rol.
+- Arquitectura: decisiones y trade-offs.
+- Historias: trazabilidad al backlog.
+- Demo: evidencia real de calidad tecnica.
+- Cierre: pensamiento critico y mejora continua.
+:::
+:::
+:::
+
+# Guion de narrativa tecnica {.smaller .compact-columns}
+
+::: { style="font-size:1.5rem" }
+En lugar de "contar todo", usa este hilo:
+
+1. Problema: que necesitaba resolver tu sistema.
+2. Decision: que arquitectura/patron elegiste.
+3. Justificacion: por que esa opcion y no otra.
+4. Evidencia: en que parte del codigo se ve.
+5. Resultado: que riesgo mitigaste o que mejora lograste.
+
+**Plantilla de frase util**:
+
+> "Para resolver X, implementamos Y porque Z. Se evidencia en A y nos permitio B."
+:::
+
+# Arquitectura: que debes poder defender {.smaller}
+
+## Preguntas que casi seguro te haran
+
+- Por que elegiste arquitectura por capas o hexagonal.
+- Como garantizaste separacion de responsabilidades.
+- Que patron de diseno aplicaste y en que punto exacto.
+- Que habria que cambiar para migrar de motor de base de datos.
+- Que principio SOLID predomina en tu solucion.
+
+## Evidencia minima esperada
+
+- Estructura de paquetes/modulos coherente.
+- Puertos e interfaces claros (si usas hexagonal).
+- Adaptadores desacoplados del dominio.
+- Excepciones y validaciones consistentes.
+
+# Demo de codigo: recorrido de alto impacto {.smaller}
+
+
+::: { style="font-size:1.2rem" }
+Orden recomendado durante la demo:
+
+1. Endpoint REST y contrato HTTP.
+2. Flujo controlador -> servicio -> repositorio/adaptador.
+3. Validaciones y manejo de errores (400, 401/403, 404, 500).
+4. Prueba unitaria de un caso feliz y un caso limite.
+5. Documentacion Swagger/OpenAPI.
+6. Pipeline CI/CD (pasos y checks).
+7. Evidencia de despliegue/operacion en AWS.
+
+:::
+
+# Banco de preguntas probables {.smaller}
+
+Usa estas respuestas como base y adaptalas a tu codigo real.
+
+# REST / HTTP / Seguridad {.smaller}
+
+## Como versionas un endpoint sin romper el anterior
+
+**Respuesta modelo**:
+
+Mantengo versionado explicito por ruta o header (por ejemplo `/api/v1` y `/api/v2`), con contrato backward compatible mientras haya consumidores de v1, y fecha de deprecacion comunicada.
+
+## Que devuelves cuando hay autenticacion pero no autorizacion
+
+**Respuesta modelo**:
+
+Respondo `403 Forbidden`, porque el usuario ya esta autenticado pero no tiene permisos para ese recurso; `401` lo uso cuando falta autenticacion o token valido.
+
+## Como respondes cuando faltan datos requeridos
+
+**Respuesta modelo**:
+
+Devuelvo `400 Bad Request` con mensaje claro por campo, validaciones centralizadas y formato consistente de error para que frontend pueda manejarlo.
+
+# Framework / Arquitectura {.smaller}
+
+## Que framework usaste para documentar microservicios y que aporta
+
+**Respuesta modelo**:
+
+Use Swagger/OpenAPI (springdoc) para describir endpoints, request/response y codigos de error; mejora integracion, pruebas manuales y onboarding tecnico.
+
+## Por que usar (o no usar) programacion reactiva en ARKA
+
+**Respuesta modelo**:
+
+Si el flujo principal era I/O intensivo con alta concurrencia, reactivo aporta escalabilidad; si el dominio era transaccional clasico y el equipo dominaba MVC, mantener Spring MVC reducia complejidad y riesgo.
+
+## Como se comunican tus capas y donde manejas excepciones
+
+**Respuesta modelo**:
+
+Controlador orquesta entrada/salida, servicio contiene reglas de negocio y repositorio/adaptador infraestructura; manejo errores de forma centralizada con `@ControllerAdvice` para mantener respuestas uniformes.
+
+# Pruebas / Datos / Operacion {.smaller}
+
+## Que principio seguiste al disenar pruebas unitarias
+
+**Respuesta modelo**:
+
+Aplique AAA (Arrange-Act-Assert), aislando dependencias con mocks y cubriendo caso feliz, borde y error para validar comportamiento del negocio.
+
+## Como pruebas una funcionalidad tipo void
+
+**Respuesta modelo**:
+
+Verifico efectos observables: cambios de estado, llamadas a dependencias (`verify` con Mockito), y excepciones esperadas cuando aplica.
+
+## Como resolverias la misma historia sin JPA y con que implicaciones
+
+**Respuesta modelo**:
+
+Usaria JDBC/jOOQ/MyBatis segun necesidad; gano control fino de SQL y rendimiento, pero asumo mas codigo de mapeo y mayor esfuerzo de mantenimiento.
+
+## Como manejaste transacciones atomicas
+
+**Respuesta modelo**:
+
+Delimite casos de uso transaccionales con `@Transactional` a nivel servicio, definiendo rollback ante excepciones de negocio/infraestructura para evitar estados parciales.
+
+## Como desplegaste en AWS y como monitoreas logs/metricas
+
+**Respuesta modelo**:
+
+Despliegue en servicios gestionados (por ejemplo ECS/EC2 + RDS), con logs centralizados en CloudWatch, metricas/alertas de salud y uso de variables de entorno para secretos y configuracion.
+
+# Como responder preguntas dificiles {.smaller}
+
+## Marco de respuesta en 4 pasos
+
+1. Contexto: "En nuestra solucion, el escenario era..."
+2. Decision: "Elegimos..."
+3. Evidencia: "Se ve en..."
+4. Limite + mejora: "Si tuvieramos mas tiempo, haria..."
+
+## Ejemplo corto
+
+**Pregunta**: "Por que hexagonal?"
+
+**Respuesta**:
+
+"Necesitabamos desacoplar dominio e infraestructura para cambiar adaptadores sin tocar reglas de negocio. Lo evidenciamos en los puertos del dominio y adaptadores REST/BD. Si migramos de motor, el impacto queda concentrado en infraestructura."
+
+# Errores frecuentes a evitar {.smaller}
+
+## Tecnicos (guia backend)
+
+- Poner logica de negocio en controladores.
+- No validar entradas ni manejar errores HTTP correctamente.
+- Pruebas fragiles o sin casos limite.
+- Pipeline sin separacion de ambientes.
+- Claves en codigo en lugar de variables de entorno.
+- No monitorear logs ni metricas en nube.
+
+## De comunicacion (guia panel)
+
+- Explicar el reto desde cero en lugar de explicar decisiones.
+- Leer diapositivas/codigo en vez de argumentar.
+- No ensayar tiempos.
+- Ocultar limitaciones en lugar de explicarlas con honestidad.
+
+# Tips concretos para destacar {.smaller}
+
+- Ensaya con cronometro real.
+- Abre pestañas del repositorio antes de iniciar.
+- Usa una historia de usuario como hilo conductor de la demo.
+- Muestra al menos una prueba ejecutada y su cobertura.
+- Ten lista una respuesta para "por que no usaste X".
+- Si algo no funciona en vivo, explica el plan B rapidamente.
+- Habla con frases cortas: problema -> decision -> evidencia -> resultado.
+- Cierra con aprendizajes y siguientes mejoras tecnicas.
+
+# Checklist de ensayo final {.smaller}
+
+- Tiempo total <= 45 min.
+- Arquitectura explicada en <= 10 min con diagrama.
+- Demo navegable sin buscar archivos al azar.
+- Casos de error visibles (no solo caso feliz).
+- Swagger/OpenAPI disponible y consistente con endpoints.
+- Pipeline mostrado con estado reciente.
+- Evidencia AWS: servicio + logs/metricas + variables de acceso.
+- Preguntas complejas practicadas en voz alta.
+
+# Cierre {.smaller}
+
+Tu objetivo no es "mostrar que todo salio perfecto".
+
+Tu objetivo es demostrar criterio de ingenieria:
+
+- Sabes decidir.
+- Sabes justificar.
+- Sabes evidenciar.
+- Sabes mejorar.
+
+## Ultimo consejo
+
+Si el panel recuerda tu razonamiento tecnico, ya ganaste gran parte de la evaluacion.
+
+# Fuentes usadas {.smaller}
+
+- Guía para preparar tu Panel De Expertos.pdf
+- Guía del Backend Java - Conceptos.pdf
+- Rubricas Acelera TI panel técnico cohorte 1 2025 V2 - David Tolosa.xlsx
